@@ -147,7 +147,7 @@ class ChatWidget(QWidget):
         msg.setFrameStyle(0)
         msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         msg.setPlainText("Hello! I'm your GeoAI assistant. How can I help you today?")
-        msg.setFixedHeight(30)
+        msg.setFixedHeight(40)
 
         self.chat_layout.addWidget(msg)
         self.scroll_to_bottom()
@@ -192,7 +192,7 @@ class ChatWidget(QWidget):
         self.assistant_msg.setFrameStyle(0)
         self.assistant_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.assistant_msg.setPlainText(self.pending_response_text)
-        self.assistant_msg.setFixedHeight(30)
+        self.assistant_msg.setFixedHeight(40)
         self.chat_layout.addWidget(self.assistant_msg)
         
         self.scroll_to_bottom()
@@ -205,7 +205,7 @@ class ChatWidget(QWidget):
             return
         self.assistant_text += text
         self.assistant_msg.setPlainText(self.assistant_text)
-        self.assistant_msg.setFixedHeight(int(self.assistant_msg.document().size().height()) + 4)
+        self.assistant_msg.setFixedHeight(int(self.assistant_msg.document().size().height()) + 20)
         self.scroll_to_bottom()
 
     def on_stream_finished(self):
@@ -238,6 +238,8 @@ class ChatWidget(QWidget):
             msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             msg.setFrameStyle(0)
             msg.setPlainText(f"Error: {text}")
+            msg.setFixedHeight(40)
+
             self.chat_layout.addWidget(msg)
         self.scroll_to_bottom()
 
