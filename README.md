@@ -52,7 +52,7 @@ The plugin is built around three main parts:
 
 ## Developer Reference
 
-For developers who want a quick overview of how the plugin source is organized, see [`geo_ai_assistant_plugin/plugin_structure.txt`](geo_ai_assistant_plugin/plugin_structure.txt).
+For developers who want a quick overview of how the plugin source is organized, see [geo_ai_assistant_plugin/plugin_structure.txt](geo_ai_assistant_plugin/plugin_structure.txt).
 
 ## Installation
 
@@ -74,10 +74,10 @@ git clone https://github.com/MovingLayers/kermit-geo-assistant.git
 ```
 
 2. Remember its location for the step 4.4 (optional)
-3. If you received a ZIP file, unzip it first.
+3. If you received a ZIP file, unzip it first. Rename the folder to `kermit-geo-assistant` from `kermit-geo-assistant-main`.
 4. After downloading, confirm the inside folders:
   * `geo_ai_assistant_plugin` contains `__init__.py`, `metadata.txt`, and `plugin.py` among others
-  * `geo_ai_assistant_plugin` contains `qgis_mcp_server.py`, `pyproject.toml`
+  * `qgis_mcp_server` contains `qgis_mcp_server.py`, `pyproject.toml`
 
 **Step 2 — Copy it to the QGIS plugins folder**
 
@@ -112,10 +112,12 @@ macOS (in Terminal):
 brew install uv
 ```
 
-Windows (in PowerShell):
+Windows (in Command Prompt):
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
+
+Restart Windows PC for the path to uv manager to be recognized by LM Studio.
 
 Other systems: Follow the instructions on the [uv installation page](https://docs.astral.sh/uv/getting-started/installation/).
 
@@ -123,11 +125,13 @@ Other systems: Follow the instructions on the [uv installation page](https://doc
 
 Download and install [LM Studio](https://lmstudio.ai) for your operating system. It is a free desktop application that lets you run AI models locally.
 
+During the first openning of the application, enable the **Developer mode**.
+
 **4.3 — Download a model**
 
 1. Open LM Studio and click **Model search** (the search icon) in the left sidebar.
 2. Search for a model. For GeoAI Assistant, a good balance of speed and capability is:
-   - Lightweight option: `liquid/lfm2.5-1.2b` — very fast, lower hardware requirements
+   - Lightweight option: `lfm2.5 1.2B` — very fast, lower hardware requirements
 3. Click the model name, then click **Download** next to the variant you want. Wait for the download to complete.
 
 **4.4 — Add the QGIS MCP tools to LM Studio**
@@ -135,8 +139,7 @@ Download and install [LM Studio](https://lmstudio.ai) for your operating system.
 GeoAI Assistant exposes a set of QGIS tools to the AI through a local TCP connection. You need to register this connection in LM Studio so the AI knows it can call QGIS functions.
 
 1. In LM Studio, open a new chat by going to the **Chat -> New Chat** on the left-side bar. 
-2. Click **+ Install** under **Integrations** on the right-side bar.
-3. Click **Edit mcp.json**.
+2. Click **Show Sidebar** button (top-right corner). There click **Integrations** -> **+ Install** -> **Edit mcp.json**.
 4. Paste the following into the file (replace the path with the actual location of the qgis_mcp_server.py that was coming together with the plugin inside the GeoAI_Assistant folder):
 
    ```json
@@ -155,7 +158,22 @@ GeoAI Assistant exposes a set of QGIS tools to the AI through a local TCP connec
    }
    ```
 
-5. Save the entry. LM Studio will show `qgis` as an available tool provider.
+If the LM Studio cannot find the uv manager on Windows, replace the "command" value with the full path to the uv. Find the path by running in Command Prompt:
+
+```powershell
+where uv
+```
+The result should look something like this:
+
+```json
+   {
+     "mcpServers": {
+       "qgis": {
+         "command": "C:/Users/<YourName>/.local/bin/uv.exe",
+         ...
+   ```
+
+5. Save the entry. LM Studio will show `qgis` as an available tool provider under the **integrations**. Enable it.
 
 > **What does this do?** When you ask GeoAI Assistant something like *"add a layer"*, the AI sends a request through this MCP connection to GeoAI Assistant, which then carries out the action inside QGIS. Without this step, the AI can chat but cannot control QGIS.
 
@@ -166,11 +184,11 @@ GeoAI Assistant exposes a set of QGIS tools to the AI through a local TCP connec
 3. The sidebar on the left should show model's settings. Click **Load** and set the **Context Length** to **8000** tokens. A larger context lets the AI remember more of your conversation.
 4. The **mcp.json** should be set automatically
 5. Click **Server Settings** and confirm that the **Server Port** is the default **1234** unless that port is already in use on your computer. In that case change it and later reference the correct port in the URL used by GeoAI Assistant. 
-6. Make sure **Enable CORS** is turned on (this allows GeoAI Assistant to communicate with the server).
-7. Still in **Server Settings**, configure the following security options:
+6. Enable **Require Authentication** and configure the following security options:
    - **Require Authentication** → click **Manage Token** → click **Create New Token** and copy the generated token. You will need to paste it into the **API Key** field in GeoAI Assistant.
    - **Allow per-request remote MCP servers** → set to **Allow**.
    - **Allow calling servers from mcp.json** → set to **Allow**.
+8. Make sure **Allow per-request MCPs**, **Allow calling servers from mcp.json**, **Enable CORS** are enabled.
 8. Click **Start Server**. The status indicator will turn green and you will see a message like *Server running* and *Reachable at http://127.0.0.1:1234*.
 
 **4.6 — Keep LM Studio running**
@@ -187,7 +205,7 @@ Click the **GeoAI Assistant** button in the toolbar. A panel opens on the right 
 Requires an API key from Moving Layers GmbH — contact [office@movinglayers.eu](mailto:office@movinglayers.eu).
 
 1. Open the **Kermit** tab.
-2. Enter the **URL** (e.g. `https://kermit-dev.movinglayers.eu` — may be pre-filled) and your **API Key**.
+2. Enter the **URL** and your **API Key**.
 3. Click **Connect**. The status label will show *Connected to Kermit*.
 4. Type your requests in the chat box and press **Enter**.
 5. Click **Disconnect** when done.
@@ -207,7 +225,7 @@ Requires LM Studio to be running (see Step 4 above).
    | **MCP tools** | Tool string (leave as-is) | `mcp/qgis` |
    | **MCP server port** | Internal port for AI commands | `9876` |
 
-   > **Note:** If you change the MCP server port, make sure the [`qgis_mcp_server/qgis_mcp_server.py`](qgis_mcp_server/qgis_mcp_server.py) references the same port.
+   > **Note:** If you change the MCP server port, make sure the [qgis_mcp_server/qgis_mcp_server.py](qgis_mcp_server/qgis_mcp_server.py) references the same port.
    > ```python
    > class QgisMCPServer:
    >     def __init__(self, host='localhost', port=9876):
