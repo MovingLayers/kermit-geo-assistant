@@ -1,0 +1,29 @@
+GeoAIAssistant/
+│
+├── metadata.txt                       # QGIS plugin metadata (name, version, author)
+├── plugin.py                          # Plugin entry point — registers the dock widget with QGIS
+├── __init__.py                        # Python package init
+│
+├── controllers/                       # Owns lifecycle, settings persistence, and wiring between transport and qgis command handler
+│   ├── mcp_controller_ws.py           # WS MCP connection: saves Kermit credentials, creates WS transport + QGIS Command Handler, emits connected/disconnected/error
+│   ├── mcp_controller_tcp.py          # TCP MCP connection: saves LLM settings + port, creates TCP transport + QGIS Command Handler, emits started/stopped
+│   └── chat_controller.py             # Chat: saves settings, creates HTTP or WS chat transport, owns conversation history, emits message/finished/error
+│
+├── mcp/                               # MCP related logic — no transport or UI knowledge
+│   ├── qgis_command_handler.py        # Executes QGIS commands (add layer, run processing, render map, etc.)
+│   ├── tools_catalog.py               # Static list of MCP tool definitions sent to the backend
+│   └── transports/
+│       ├── mcp_transport_tcp.py       # TCP transport: listens on a socket, reads/writes JSON frames via QTimer polling
+│       └── mcp_transport_ws.py        # WS transport: connects to backend WebSocket, handles MCP handshake (tools/list → tools/call)
+│
+├── chat/                              # Chat I/O — no QGIS or UI knowledge
+│   └── transports/
+│       ├── chat_transport_http.py     # HTTP transport: sends conversation to LLM REST API in a background QThread, emits streamed chunks
+│       └── chat_transport_ws.py       # WS transport: persistent WebSocket connection to Kermit chat endpoint, queues and sends messages
+│
+└── ui/                                # Rendering only — no settings, no transport, no business logic
+    ├── dock_widget.py                 # Main dock: creates tabs, instantiates controllers and widgets, stops active tab on close
+    ├── conn_widget_ws.py              # "Moving Layers" server panel: URL + API key fields, connect/disconnect button, status label
+    ├── conn_widget_tcp.py             # "Local LLMs" server panel: URL, key, model, tools, port fields, start/stop button, status label
+    ├── chat_widget.py                 # Chat panel: message bubbles, streaming text browser, input box, clear button
+    └── styles.qss                     # Qt stylesheet for all widget appearance

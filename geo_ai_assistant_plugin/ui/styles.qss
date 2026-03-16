@@ -1,0 +1,106 @@
+/* --------------------------General style-------------------------- */
+#GeoAI_Assistant_Dock QWidget {
+    background-color: white;
+}
+
+#GeoAI_Assistant_Dock QLabel {
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+}
+
+#GeoAI_Assistant_Dock QTabWidget::pane {
+    border: none;
+}
+/* --------------------------Connection settings----------------------------- */
+/* Connection settings collapse box */
+#GeoAI_Assistant_Dock QgsCollapsibleGroupBox {
+    border: none;
+    margin-top: 10px;
+}
+
+/* Connection tabs */
+#GeoAI_Assistant_Dock QTabBar::tab {
+    background: transparent;
+    padding: 8px 18px;
+    margin-right: 6px;
+    color: #555555;
+}
+
+#GeoAI_Assistant_Dock QTabBar::tab:hover {
+    background: #e4e3e7;
+    border-radius: 4px;
+}
+
+#GeoAI_Assistant_Dock QTabBar::tab:selected {
+    color: #1a1a1a;
+    border-bottom: 3px solid #511A3F;
+}
+
+/* Connection port */
+#GeoAI_Assistant_Dock ConnWidgetTcp QSpinBox {
+    min-width: 60px;
+}
+
+#GeoAI_Assistant_Dock QPushButton {
+    background-color: #e4e3e7;
+    color: black;
+    border-radius: 10px;
+    padding: 6px 14px;
+    font-weight: bold;
+}
+
+#GeoAI_Assistant_Dock QPushButton:hover {
+    background-color: #511A3F;
+    color: white;
+}
+
+/* --------------------------Chat area-------------------------- */
+/* Scroll area */
+#GeoAI_Assistant_Dock QScrollArea {
+    border: none; 
+}
+
+/* User message */
+#GeoAI_Assistant_Dock QLabel#chatMsgUser {
+    border: 1px solid #f4f3f3;
+    border-radius: 10px;
+    background-color: #f4f3f3;
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* Assistant message */
+#GeoAI_Assistant_Dock QTextBrowser{
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    background-color: transparent; 
+    border: none;
+    margin: 8px 4px;
+}
+
+/* Prompt field */
+#GeoAI_Assistant_Dock QTextEdit#promptInput {
+    border: 1px solid #f4f3f3;
+    border-radius: 10px;
+    background-color: #f4f3f3;
+    padding: 6px;
+    margin: 5px;
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* Cancel button */
+#GeoAI_Assistant_Dock QToolButton#cancelStreamButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 2px;
+}
+
+#GeoAI_Assistant_Dock QToolButton#cancelStreamButton:hover {
+    background-color: rgba(132, 92, 148, 0.15);
+}
+
+#GeoAI_Assistant_Dock QToolButton#cancelStreamButton:pressed {
+    background-color: rgba(53, 53, 54, 0.3);
+}
