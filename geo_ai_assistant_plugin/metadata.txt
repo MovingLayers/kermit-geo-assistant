@@ -5,7 +5,7 @@ about=AI-powered assistant for QGIS that lets you control your project using nat
 
 version=1.0
 qgisMinimumVersion=3.0
-repository=to be filled
+repository=https://github.com/MovingLayers/kermit-geo-assistant
 tags=AI, agent
 icon=ui/icons/logo.png
 
