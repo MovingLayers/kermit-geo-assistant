@@ -1,5 +1,5 @@
 [general]
-name=QGIS GeoAI Assistant
+name=Kermit GeoAssistant
 description=An AI helper for spatial tasks with the MCP server.
 about=AI-powered assistant for QGIS that lets you control your project using natural language. Connects to cloud or local LLMs via the Model Context Protocol (MCP) to inspect layers, add data, and execute PyQGIS code through a built-in chat interface. The QGISMCP plugin by TuNombre served as the main foundation for this project.
 

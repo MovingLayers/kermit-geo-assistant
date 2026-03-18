@@ -1,4 +1,4 @@
-GeoAIAssistant/
+kermit_geo_assistant_plugin/
 │
 ├── metadata.txt                       # QGIS plugin metadata (name, version, author)
 ├── plugin.py                          # Plugin entry point — registers the dock widget with QGIS
