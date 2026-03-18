@@ -8,8 +8,8 @@ from qgis.PyQt.QtGui import QIcon
 
 from .ui.dock_widget import DockWidget
 
-class GeoAIAssistantPlugin:
-    """Main plugin class for GeoAI Assistant"""
+class KermitGeoAssistantPlugin:
+    """Main plugin class for Kermit Geo Assistant"""
     
     def __init__(self, iface):
         self.iface = iface
@@ -21,14 +21,14 @@ class GeoAIAssistantPlugin:
         # Create action with icon and text
         self.action = QAction(
             QIcon(os.path.join(os.path.dirname(__file__), "ui", "icons", "plugin_logo.png")),
-            "GeoAI Assistant",
+            "Kermit GeoAssistant",
             self.iface.mainWindow()
         )
         self.action.setCheckable(True)
         self.action.triggered.connect(self.toggle_dock)
 
         # Add to plugins menu and toolbar
-        self.iface.addPluginToMenu("GeoAI Assistant", self.action)
+        self.iface.addPluginToMenu("Kermit GeoAssistant", self.action)
         self.iface.addToolBarIcon(self.action)
 
         # Show icon + text on the toolbar button
@@ -69,9 +69,9 @@ class GeoAIAssistantPlugin:
             self.dock_widget = None
             
         # Remove plugin menu item and toolbar icon
-        self.iface.removePluginMenu("GeoAI Assistant", self.action)
+        self.iface.removePluginMenu("Kermit GeoAssistant", self.action)
         self.iface.removeToolBarIcon(self.action)
 
 # Plugin entry point
 def classFactory(iface):
-    return GeoAIAssistantPlugin(iface)
+    return KermitGeoAssistantPlugin(iface)
