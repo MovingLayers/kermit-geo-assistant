@@ -27,22 +27,22 @@ class McpControllerWs(QObject):
     def saved_api_key(self):
         return self.settings.value("geo_ai_assistant/kermit_api_key", "")
 
-    def connect(self, url: str, api_key: str):
+    def connect(self, url: str, api_key: str, session_id: str = ""):
         """Establish a WebSocket connection to the MCP server on Kermit."""
         # Guard against multiple connections - log and ignore if already connected
         if self.transport:
             return
-        
+
         # Initialize the QGIS command handler
         self.qgis_command_handler = QgisCommandHandler(iface=self.iface, parent=self)
 
         # Save the URL and API key to settings for future use
         self.settings.setValue("geo_ai_assistant/kermit_url", url)
         self.settings.setValue("geo_ai_assistant/kermit_api_key", api_key)
-        
-        # Convert the URL to a WebSocket URL and append the API key as a query parameter
+
+        # Convert the URL to a WebSocket URL and append credentials
         url = url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
-        url = f"{url}/ws/mcp?api_key={api_key}"
+        url = f"{url}/ws/mcp?api_key={api_key}&session_id={session_id}"
 
         # Create the transport and pass the qgis_command_handler's execute_command method to it
         self.transport = McpTransportWs(url=url,execute_command=self.qgis_command_handler.execute_command,parent=self)
