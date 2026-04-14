@@ -13,6 +13,7 @@ class ChatTransportWs(QObject):
     finished = pyqtSignal()         # message fully received
     error = pyqtSignal(str)         # error messages
     connection_error = pyqtSignal(str)  # separate signal for connection errors
+    session_created = pyqtSignal(str)   # emitted with session_id once server confirms session
 
     def __init__(self, url: str, parent=None):
         """Initialize the WebSocket connection to the given URL."""
@@ -97,10 +98,13 @@ class ChatTransportWs(QObject):
             return
         
         # Handle different message types accordingly
-        if msg_type == "status":
+        if msg_type == "session_created":
+            self.session_created.emit(event.get("session_id", ""))
+            return
+        elif msg_type == "status":
             content = event.get("content", "")
             if content:
-                self.message.emit(content + "\n")    
+                self.message.emit(content + "\n")
         elif msg_type == "user_status":
             message = event["data"]["message"]
             icon = event["data"]["icon"]

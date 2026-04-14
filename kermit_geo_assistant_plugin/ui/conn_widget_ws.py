@@ -19,10 +19,13 @@ class ConnWidgetWs(QWidget):
         # Controllers for managing connection and chat, and their signals
         self.controller = controller
         self.chat_controller = chat_controller
+        self._pending_url = ""
+        self._pending_api_key = ""
         self.controller.connected.connect(self._on_connected)
         self.controller.disconnected.connect(self._on_disconnected)
         self.controller.error.connect(self._on_error)
         self.chat_controller.connection_error.connect(self._on_error)
+        self.chat_controller.session_created.connect(self._on_session_created)
 
         self.setup_ui()
 
@@ -74,8 +77,16 @@ class ConnWidgetWs(QWidget):
             self.controller.disconnect()
             self.chat_controller.close()
         else:
-            self.controller.connect(self.url_input.text(), self.api_key_input.text())
-            self.chat_controller.connect(self.url_input.text(), self.api_key_input.text())
+            # Store credentials so _on_session_created can connect MCP once the
+            # server sends back the session_id via the chat WebSocket.
+            self._pending_url = self.url_input.text()
+            self._pending_api_key = self.api_key_input.text()
+            self.chat_controller.connect(self._pending_url, self._pending_api_key)
+
+    def _on_session_created(self, session_id: str):
+        """Called once the chat WebSocket receives the server-assigned session_id.
+        Now connect the MCP WebSocket with the session_id so the server can link them."""
+        self.controller.connect(self._pending_url, self._pending_api_key, session_id)
 
     def disconnect(self):
         """Called by dock_widget on close."""
