@@ -43,7 +43,7 @@ class ChatTransportWs(QObject):
         """Send a conversation to the Kermit."""
         if not conversation:
             return
-        query = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation])
+        query = conversation[-1]["content"]  # Send only the latest user message
         self.queue.append(query)
         self.try_send_next()
 
