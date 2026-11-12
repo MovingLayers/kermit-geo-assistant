@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QSettings
 
 from ..mcp.qgis_command_handler import QgisCommandHandler
@@ -42,7 +44,7 @@ class McpControllerWs(QObject):
 
         # Convert the URL to a WebSocket URL and append credentials
         url = url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
-        url = f"{url}/ws/mcp?api_key={api_key}&session_id={session_id}"
+        url = f"{url}/ws/mcp?api_key={quote(api_key, safe='')}&session_id={session_id}"
 
         # Create the transport and pass the qgis_command_handler's execute_command method to it
         self.transport = McpTransportWs(url=url,execute_command=self.qgis_command_handler.execute_command,parent=self)

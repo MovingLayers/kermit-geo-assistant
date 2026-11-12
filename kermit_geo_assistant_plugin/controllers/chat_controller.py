@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QSettings
 
 from ..chat.transports.chat_transport_http import ChatTransportHttp
@@ -59,7 +61,7 @@ class ChatController(QObject):
         self.close()
         if self.transport_type == 'ws':
             url = url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
-            self.transport = ChatTransportWs(url=f"{url}/chat?api_key={api_key}", parent=self)
+            self.transport = ChatTransportWs(url=f"{url}/chat?api_key={quote(api_key, safe='')}", parent=self)
         else:
             self.transport = ChatTransportHttp(url, api_key, model, mcp_tools, parent=self)
         self.wire_transport()
