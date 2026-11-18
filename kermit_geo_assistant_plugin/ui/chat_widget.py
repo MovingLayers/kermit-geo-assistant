@@ -1,4 +1,5 @@
 import os
+import re
 
 from qgis.core import *
 from qgis.gui import *
@@ -212,7 +213,8 @@ class ChatWidget(QWidget):
         if not self.assistant_msg:
             return
         self.assistant_text += text
-        self.assistant_msg.setMarkdown(self.assistant_text)
+        # A single newline is a space in Markdown; keep it as a line break (blank lines stay paragraph breaks)
+        self.assistant_msg.setMarkdown(re.sub(r"(?<!\n)\n(?!\n)", "  \n", self.assistant_text))
         self.assistant_msg.setFixedHeight(int(self.assistant_msg.document().size().height()) + 20)
         self.scroll_to_bottom()
 
