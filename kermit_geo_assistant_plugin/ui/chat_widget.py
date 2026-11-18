@@ -7,6 +7,13 @@ from qgis.PyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScro
 from qgis.PyQt.QtGui import QIcon
 
 
+TABLE_STYLE = """
+table { border-collapse: collapse; border-width: 1px; border-style: solid; border-color: #9aa0a6; }
+th, td { padding: 4px 10px; border-width: 1px; border-style: solid; border-color: #9aa0a6; }
+th { font-weight: bold; }
+"""
+
+
 class ChatWidget(QWidget):
     """
     Chat interface for interacting with the assistant. 
@@ -190,6 +197,7 @@ class ChatWidget(QWidget):
         self.assistant_msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.assistant_msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.assistant_msg.setFrameStyle(0)
+        self.assistant_msg.document().setDefaultStyleSheet(TABLE_STYLE)
         self.assistant_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.assistant_msg.setPlainText(self.pending_response_text)
         self.assistant_msg.setFixedHeight(40)
@@ -204,7 +212,7 @@ class ChatWidget(QWidget):
         if not self.assistant_msg:
             return
         self.assistant_text += text
-        self.assistant_msg.setPlainText(self.assistant_text)
+        self.assistant_msg.setMarkdown(self.assistant_text)
         self.assistant_msg.setFixedHeight(int(self.assistant_msg.document().size().height()) + 20)
         self.scroll_to_bottom()
 
