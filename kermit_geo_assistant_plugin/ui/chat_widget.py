@@ -3,7 +3,7 @@ import re
 
 from qgis.core import *
 from qgis.gui import *
-from qgis.PyQt.QtCore import Qt, QEvent, QPointF, QSize
+from qgis.PyQt.QtCore import Qt, QEvent, QPointF, QRect, QSize, QTimer
 from qgis.PyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea, QSizePolicy, QTextEdit, QTextBrowser, QToolButton, QFileDialog, QFrame
 from qgis.PyQt.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
 
@@ -15,6 +15,57 @@ table { border-collapse: collapse; border-width: 1px; border-style: solid; borde
 th, td { padding: 4px 10px; border-width: 1px; border-style: solid; border-color: #9aa0a6; }
 th { font-weight: bold; }
 """
+
+
+class AutoHeightBrowser(QTextBrowser):
+    """A message bubble whose height follows its text, also when the window width changes."""
+
+    PADDING = 20
+
+    def fit_height(self):
+        """Set the height to what the text needs at the current width."""
+        width = self.viewport().width()
+        if width <= 0:
+            return
+        self.document().setTextWidth(width)
+        height = int(self.document().size().height()) + self.PADDING
+        if self.height() != height:
+            self.setFixedHeight(height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit_height()
+
+
+class UserBubble(QLabel):
+    """A user message bubble that fits its text and grows up to a share of the chat width."""
+
+    SHARE = 0.85
+    PADDING_X = 8
+    PADDING_Y = 4
+    BORDER = 1
+
+    def __init__(self, text):
+        super().__init__(text)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.setObjectName("chatMsgUser")
+        self.setWordWrap(True)
+        self.setContentsMargins(self.PADDING_X, self.PADDING_Y, self.PADDING_X, self.PADDING_Y)
+
+    def fit(self, available):
+        """Set width and height for a chat area of the given width."""
+        inner = int(available * self.SHARE) - 2 * (self.PADDING_X + self.BORDER)
+        if inner <= 0:
+            return
+        flags = Qt.TextWordWrap
+        text = self.text()
+        one_line = self.fontMetrics().boundingRect(QRect(0, 0, 100000, 100000), flags, text)
+        width = min(one_line.width() + 2, inner)
+        wrapped = self.fontMetrics().boundingRect(QRect(0, 0, width, 100000), flags, text)
+        self.setFixedSize(
+            width + 2 * (self.PADDING_X + self.BORDER),
+            wrapped.height() + 2 * (self.PADDING_Y + self.BORDER),
+        )
 
 
 def plus_icon(size=14, scale=4):
@@ -90,7 +141,7 @@ class ChatWidget(QWidget):
         self.chat_container = QWidget()
         self.chat_layout = QVBoxLayout()
         self.chat_layout.setAlignment(Qt.AlignTop)
-        self.chat_layout.setContentsMargins(0, 0, 0, 0)
+        self.chat_layout.setContentsMargins(5, 0, 5, 0)
         self.chat_layout.setSpacing(2)
         self.chat_container.setLayout(self.chat_layout)
         self.scroll_area.setWidget(self.chat_container)
@@ -98,6 +149,7 @@ class ChatWidget(QWidget):
 
         # Clear chat button
         self.clear_button = QToolButton()
+        self.clear_button.setObjectName("clearChatButton")
         self.clear_button.setText("Clear chat")
         self.clear_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), "icons", "clear_chat.png")))
         self.clear_button.setVisible(False)
@@ -151,10 +203,15 @@ class ChatWidget(QWidget):
         box_layout.addLayout(bottom_row)
         main_layout.addWidget(self.input_box)
 
+        self.scroll_area.viewport().installEventFilter(self)
+
         # Show placeholder content until connected
         self.show_placeholder()
 
     def eventFilter(self, obj, event):
+        # Refit the user bubbles when the chat area changes its width
+        if obj == self.scroll_area.viewport() and event.type() == QEvent.Resize:
+            QTimer.singleShot(0, self.fit_user_bubbles)
         # Handle Enter key for sending prompts
         if obj == self.prompt_input:
             if event.type() == QEvent.KeyPress:
@@ -198,15 +255,16 @@ class ChatWidget(QWidget):
         """Display a welcome message when the connection is established."""
         self.clear_chat()
         self.chat_layout.setAlignment(Qt.AlignTop)
-        msg = QTextBrowser()
+        msg = AutoHeightBrowser()
         msg.setOpenExternalLinks(False)
         msg.setReadOnly(True)
         msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         msg.setFrameStyle(0)
+        msg.document().setDocumentMargin(0)
         msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        msg.setPlainText("Hello! I'm your GeoAI assistant. How can I help you today?")
+        msg.setPlainText("Hallo! Ich bin Ihr GeoAI-Assistent. Wie kann ich Ihnen heute helfen?")
         msg.setFixedHeight(40)
 
         self.chat_layout.addWidget(msg)
@@ -332,14 +390,9 @@ class ChatWidget(QWidget):
 
     def add_user_message(self, text):
         """Add a user message to the chat layout."""
-        msg = QLabel(text)
-        msg.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
-        msg.setObjectName("chatMsgUser")
-        msg.setWordWrap(True)
-        msg.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-        msg.setMaximumWidth(int(self.scroll_area.width() * 0.8))
-        msg.setMinimumWidth(200)
-        msg.setContentsMargins(8, 4, 8, 4)
+        msg = UserBubble(text)
+        msg.fit(self.chat_width())
+        QTimer.singleShot(0, self.fit_user_bubbles)  # the chat area may still change its width
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addStretch()
@@ -347,16 +400,26 @@ class ChatWidget(QWidget):
         self.chat_layout.addLayout(layout)
         self.scroll_to_bottom()
 
+    def chat_width(self):
+        """The width available for messages."""
+        return self.scroll_area.viewport().width() - self.chat_layout.contentsMargins().left() - self.chat_layout.contentsMargins().right()
+
+    def fit_user_bubbles(self):
+        """Fit the user bubbles to the chat area's current width."""
+        for bubble in self.chat_container.findChildren(UserBubble):
+            bubble.fit(self.chat_width())
+
     def start_assistant_stream(self):
         """Prepare the UI for a new assistant response stream."""
         self.assistant_text = ""
-        self.assistant_msg = QTextBrowser()
+        self.assistant_msg = AutoHeightBrowser()
         self.assistant_msg.setOpenExternalLinks(False)
         self.assistant_msg.setReadOnly(True)
         self.assistant_msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.assistant_msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.assistant_msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.assistant_msg.setFrameStyle(0)
+        self.assistant_msg.document().setDocumentMargin(0)
         self.assistant_msg.document().setDefaultStyleSheet(TABLE_STYLE)
         self.assistant_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.assistant_msg.setPlainText(self.pending_response_text)
@@ -374,7 +437,7 @@ class ChatWidget(QWidget):
         self.assistant_text += text
         # A single newline is a space in Markdown; keep it as a line break (blank lines stay paragraph breaks)
         self.assistant_msg.setMarkdown(re.sub(r"(?<!\n)\n(?!\n)", "  \n", self.assistant_text))
-        self.assistant_msg.setFixedHeight(int(self.assistant_msg.document().size().height()) + 20)
+        self.assistant_msg.fit_height()
         self.scroll_to_bottom()
 
     def on_stream_finished(self):
@@ -399,13 +462,14 @@ class ChatWidget(QWidget):
             self.assistant_text = ""
         else:
             # No bubble in progress — create a new one
-            msg = QTextBrowser()
+            msg = AutoHeightBrowser()
             msg.setOpenExternalLinks(False)
             msg.setReadOnly(True)
             msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
             msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             msg.setFrameStyle(0)
+            msg.document().setDocumentMargin(0)
             msg.setPlainText(f"Error: {text}")
             msg.setFixedHeight(40)
 

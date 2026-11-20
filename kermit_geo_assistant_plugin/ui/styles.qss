@@ -75,7 +75,11 @@
     font-size: 13px;
     background-color: transparent; 
     border: none;
-    margin: 8px 4px;
+    margin: 8px 0;
+}
+
+#GeoAI_Assistant_Dock QToolButton#clearChatButton {
+    margin-right: 5px;
 }
 
 /* Input box: attached files, prompt field, buttons */
