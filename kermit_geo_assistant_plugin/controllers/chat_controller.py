@@ -2,6 +2,7 @@ from urllib.parse import quote
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QSettings
 
+from ..chat.file_upload import AllowedTypesFetcher, FileUploader
 from ..chat.transports.chat_transport_http import ChatTransportHttp
 from ..chat.transports.chat_transport_ws import ChatTransportWs
 
@@ -18,6 +19,9 @@ class ChatController(QObject):
     connected = pyqtSignal() # emitted when connection is established
     disconnected = pyqtSignal() # emitted when connection is closed
     session_created = pyqtSignal(str)  # emitted with server-assigned session_id (ws transport only)
+    allowed_types = pyqtSignal(list)  # file extensions the server accepts; emitted after session_created
+    allowed_types_failed = pyqtSignal(str)
+    upload_done = pyqtSignal(dict)  # file path -> error message; empty when all files were stored
 
     def __init__(self, transport_type: str, parent=None):
         """Initialize the controller with the specified transport type."""
@@ -26,12 +30,23 @@ class ChatController(QObject):
         self.settings = QSettings()
         self.conversation = []
         self.transport = None
+        self.base_url = ""
+        self.api_key = ""
+        self.session_id = ""
+        self.types_worker = None
+        self.upload_worker = None
 
     def send(self, user_text: str):
         """Called by the widget when the user submits a message. Appends the user message to the conversation and sends it via the transport."""
         self.conversation.append({"role": "user", "content": user_text})
         if self.transport is not None:
             self.transport.send(self.conversation)
+
+    def send_files_attached(self, names: list):
+        """Called by the widget when files were attached without a text."""
+        self.conversation.append({"role": "user", "content": "Angehängt: " + ", ".join(names)})
+        if self.transport is not None and hasattr(self.transport, "send_files_attached"):
+            self.transport.send_files_attached()
 
     def add_assistant_reply(self, text: str):
         """Called by the widget once a full response has been streamed."""
@@ -49,8 +64,23 @@ class ChatController(QObject):
         """Called by the widget to clear the conversation history."""
         self.conversation.clear()
 
+    def upload_files(self, paths: list):
+        """Upload the files to the session; upload_done reports the failures."""
+        self.upload_worker = FileUploader(self.base_url, self.api_key, self.session_id, paths, parent=self)
+        self.upload_worker.done.connect(self.upload_done)
+        self.upload_worker.start()
+
+    def on_session_created(self, session_id: str):
+        """Remember the session and ask the server which file types it accepts."""
+        self.session_id = session_id
+        self.types_worker = AllowedTypesFetcher(self.base_url, self.api_key, parent=self)
+        self.types_worker.fetched.connect(self.allowed_types)
+        self.types_worker.failed.connect(self.allowed_types_failed)
+        self.types_worker.start()
+
     def close(self):
         """Clean up transport on plugin unload."""
+        self.session_id = ""
         if self.transport is not None and self.transport_type == 'ws':
             self.transport.close()
         self.transport = None
@@ -59,6 +89,8 @@ class ChatController(QObject):
     def connect(self, url: str, api_key: str, model: str = "", mcp_tools: str = ""):
         """Called by the widget when the user clicks Connect. Cleans up any existing transport and creates a new one based on the specified transport type and URL."""
         self.close()
+        self.base_url = url.rstrip("/")
+        self.api_key = api_key
         if self.transport_type == 'ws':
             url = url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
             self.transport = ChatTransportWs(url=f"{url}/chat?api_key={quote(api_key, safe='')}", parent=self)
@@ -75,3 +107,4 @@ class ChatController(QObject):
         self.transport.connection_error.connect(self.connection_error)
         if self.transport_type == 'ws':
             self.transport.session_created.connect(self.session_created)
+            self.transport.session_created.connect(self.on_session_created)

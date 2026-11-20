@@ -3,9 +3,11 @@ import re
 
 from qgis.core import *
 from qgis.gui import *
-from qgis.PyQt.QtCore import Qt, QEvent
-from qgis.PyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea, QSizePolicy, QTextEdit, QTextBrowser, QToolButton
-from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtCore import Qt, QEvent, QPointF, QSize
+from qgis.PyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea, QSizePolicy, QTextEdit, QTextBrowser, QToolButton, QFileDialog, QFrame
+from qgis.PyQt.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+
+from .flow_layout import FlowLayout
 
 
 TABLE_STYLE = """
@@ -13,6 +15,25 @@ table { border-collapse: collapse; border-width: 1px; border-style: solid; borde
 th, td { padding: 4px 10px; border-width: 1px; border-style: solid; border-color: #9aa0a6; }
 th { font-weight: bold; }
 """
+
+
+def plus_icon(size=14, scale=4):
+    """A centred "+" icon, drawn at a higher resolution so it stays sharp: grey enabled, light grey disabled."""
+    icon = QIcon()
+    pixels = size * scale
+    for mode, color in ((QIcon.Normal, "#555555"), (QIcon.Disabled, "#b5b4b8")):
+        pixmap = QPixmap(pixels, pixels)
+        pixmap.setDevicePixelRatio(scale)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(color), 1.6, Qt.SolidLine, Qt.FlatCap))
+        middle, reach = size / 2, size * 0.32
+        painter.drawLine(QPointF(middle - reach, middle), QPointF(middle + reach, middle))
+        painter.drawLine(QPointF(middle, middle - reach), QPointF(middle, middle + reach))
+        painter.end()
+        icon.addPixmap(pixmap, mode)
+    return icon
 
 
 class ChatWidget(QWidget):
@@ -34,11 +55,21 @@ class ChatWidget(QWidget):
         self.controller.connected.connect(self.show_welcome_message)
         self.controller.disconnected.connect(lambda: self.prompt_input.setEnabled(False))
         self.controller.disconnected.connect(self.show_placeholder)
+        self.controller.disconnected.connect(self.reset_attachments)
+        self.controller.allowed_types.connect(self.on_allowed_types)
+        self.controller.allowed_types_failed.connect(self.on_allowed_types_failed)
+        self.controller.upload_done.connect(self.on_upload_done)
 
         # State for the in-progress assistant message
         self.assistant_msg = None
         self.assistant_text = ""
         self.pending_response_text = "Processing your request..."
+
+        # Files attached to the next message: file name -> path; names whose upload failed
+        self.attachments = {}
+        self.failed_attachments = {}
+        self.allowed_extensions = []
+        self.pending_prompt = ""
 
         self.setup_ui()
 
@@ -63,7 +94,7 @@ class ChatWidget(QWidget):
         self.chat_layout.setSpacing(2)
         self.chat_container.setLayout(self.chat_layout)
         self.scroll_area.setWidget(self.chat_container)
-        main_layout.addWidget(self.scroll_area)
+        main_layout.addWidget(self.scroll_area, 1)
 
         # Clear chat button
         self.clear_button = QToolButton()
@@ -73,45 +104,66 @@ class ChatWidget(QWidget):
         self.clear_button.clicked.connect(self.clear_chat)
         main_layout.addWidget(self.clear_button, alignment=Qt.AlignRight)
 
-        # Prompt input area
+        # Input box: attached files (chips) above the text, "+" and cancel below it
+        self.input_box = QFrame()
+        self.input_box.setObjectName("inputBox")
+        self.input_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        box_layout = QVBoxLayout(self.input_box)
+        box_layout.setContentsMargins(8, 6, 8, 4)
+        box_layout.setSpacing(2)
+
+        self.attachments_container = QWidget()
+        self.attachments_container.setObjectName("attachmentsContainer")
+        self.attachments_layout = FlowLayout(self.attachments_container, spacing=6)
+        self.attachments_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        self.attachments_container.setVisible(False)
+        box_layout.addWidget(self.attachments_container)
+
         self.prompt_input = QTextEdit()
         self.prompt_input.setObjectName("promptInput")
         self.prompt_input.setPlaceholderText("Ask the assistant…")
-        self.prompt_input.setFixedHeight(90)
+        self.prompt_input.setFrameStyle(QFrame.NoFrame)
+        self.prompt_input.setFixedHeight(48)
         self.prompt_input.installEventFilter(self)
         self.prompt_input.setEnabled(False)
-        self.cancel_button = QToolButton(self.prompt_input)   # parent = prompt_input → overlaps it
+        box_layout.addWidget(self.prompt_input)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        # "+" opens the file picker; enabled once the server told which file types it accepts
+        self.attach_button = QToolButton()
+        self.attach_button.setObjectName("attachButton")
+        self.attach_button.setIcon(plus_icon())
+        self.attach_button.setIconSize(QSize(14, 14))
+        self.attach_button.setToolTip("Dateien anhängen")
+        self.attach_button.setFixedSize(24, 24)
+        self.attach_button.setEnabled(False)
+        self.attach_button.clicked.connect(self.pick_files)
+        bottom_row.addWidget(self.attach_button)
+        bottom_row.addStretch()
+        self.cancel_button = QToolButton()
         self.cancel_button.setObjectName("cancelStreamButton")
         self.cancel_button.setIcon(QgsApplication.getThemeIcon("/mActionStop.svg"))
         self.cancel_button.setToolTip("Cancel")
         self.cancel_button.setVisible(False)
         self.cancel_button.clicked.connect(self.cancel_stream)
-        self.cancel_button.raise_()
-        main_layout.addWidget(self.prompt_input) 
+        bottom_row.addWidget(self.cancel_button)
+        box_layout.addLayout(bottom_row)
+        main_layout.addWidget(self.input_box)
 
         # Show placeholder content until connected
         self.show_placeholder()
 
     def eventFilter(self, obj, event):
-        # Handle Enter key for sending prompts, and repositioning the cancel button on resize
+        # Handle Enter key for sending prompts
         if obj == self.prompt_input:
-            if event.type() == QEvent.Resize:
-                self.reposition_cancel_button()
-            elif event.type() == QEvent.KeyPress:
+            if event.type() == QEvent.KeyPress:
                 if event.key() in (Qt.Key_Return, Qt.Key_Enter):
                     if not event.modifiers() & Qt.ShiftModifier:
                         self.send_prompt()
                         return True
         return super().eventFilter(obj, event)
     
-    def reposition_cancel_button(self):
-        """Position the cancel button at the bottom-right corner of the prompt input."""
-        margin = 4
-        btn = self.cancel_button.sizeHint()
-        x = self.prompt_input.width() - btn.width() - margin
-        y = self.prompt_input.height() - btn.height() - margin
-        self.cancel_button.move(max(0, x), max(0, y))
-
     def show_placeholder(self):
         """Show a placeholder image and text when not connected."""
         self.clear_layout(self.chat_layout)
@@ -164,12 +216,119 @@ class ChatWidget(QWidget):
     def send_prompt(self):
         """Send the user's prompt to the controller and prepare the UI for the assistant's response."""
         prompt = self.prompt_input.toPlainText().strip()
-        if not prompt:
+        if (not prompt and not self.attachments) or not self.prompt_input.isEnabled():
             return
+        if self.attachments:
+            self.set_sending_enabled(False)
+            self.failed_attachments = {}
+            self.render_attachments()
+            self.controller.upload_files(list(self.attachments.values()))
+            return
+        self.deliver_prompt(prompt)
+
+    def deliver_prompt(self, prompt):
+        """Show the user's message and send it."""
         self.add_user_message(prompt)
         self.prompt_input.clear()
         self.start_assistant_stream()
         self.controller.send(prompt)   # controller owns conversation + transport
+
+    def deliver_files_attached(self, names):
+        """Show the attached file names as the user's message and tell Kermit the files are there."""
+        text = "Angehängt: " + ", ".join(names)
+        self.add_user_message(text)
+        self.start_assistant_stream()
+        self.controller.send_files_attached(names)
+
+    def on_upload_done(self, failures):
+        """Send the message when all files are stored; otherwise keep it and mark the failed files."""
+        self.set_sending_enabled(True)
+        if not failures:
+            names = list(self.attachments)
+            self.attachments = {}
+            self.render_attachments()
+            prompt = self.prompt_input.toPlainText().strip()
+            if prompt:
+                self.deliver_prompt(prompt)
+            else:
+                self.deliver_files_attached(names)
+            return
+        self.failed_attachments = {os.path.basename(path): text for path, text in failures.items()}
+        self.render_attachments()
+        lines = "\n".join(f"{name}: {text}" for name, text in self.failed_attachments.items())
+        self.append_error(f"Die Nachricht wurde nicht gesendet. Diese Dateien konnten nicht angehängt werden:\n{lines}")
+
+    def set_sending_enabled(self, enabled):
+        """Block the input and the attach button while files are uploading."""
+        self.prompt_input.setEnabled(enabled)
+        self.attach_button.setEnabled(enabled and bool(self.allowed_extensions))
+
+    def on_allowed_types(self, extensions):
+        """The server told which file types a session accepts."""
+        self.allowed_extensions = [e.lower() for e in extensions]
+        self.attach_button.setEnabled(bool(self.allowed_extensions))
+        self.attach_button.setToolTip("Dateien anhängen")
+
+    def on_allowed_types_failed(self, text):
+        """The server did not tell the accepted file types: files cannot be attached."""
+        self.allowed_extensions = []
+        self.attach_button.setEnabled(False)
+        self.attach_button.setToolTip(f"Dateien anhängen ist nicht verfügbar: {text}")
+
+    def pick_files(self):
+        """Let the user choose files; a file with the name of a listed file replaces it."""
+        patterns = " ".join(f"*{e}" for e in self.allowed_extensions)
+        paths, _ = QFileDialog.getOpenFileNames(self, "Attach files", "", f"Supported files ({patterns})")
+        for path in paths:
+            name = os.path.basename(path)
+            self.attachments[name] = path
+            self.failed_attachments.pop(name, None)
+        self.render_attachments()
+
+    def remove_attachment(self, name):
+        """Remove a file from the list; nothing was uploaded yet."""
+        self.attachments.pop(name, None)
+        self.failed_attachments.pop(name, None)
+        self.render_attachments()
+
+    def render_attachments(self):
+        """One chip per attached file: name, size, remove button; a failed file is marked red with the reason."""
+        self.clear_layout(self.attachments_layout)
+        for name, path in self.attachments.items():
+            try:
+                size = f"{os.path.getsize(path) / 1024:.0f} KB"
+            except OSError:
+                size = ""
+            reason = self.failed_attachments.get(name)
+            chip = QFrame()
+            chip.setObjectName("attachmentChip")
+            chip.setProperty("failed", bool(reason))
+            chip.setToolTip(f"{name} ({size})" + (f"\n{reason}" if reason else ""))
+            label = QLabel()
+            shown = label.fontMetrics().elidedText(name, Qt.ElideMiddle, 150)
+            label.setText(f"{shown}  {size}".strip())
+            remove = QToolButton()
+            remove.setObjectName("removeAttachment")
+            remove.setText("✕")
+            remove.setToolTip("Entfernen")
+            remove.setAutoRaise(True)
+            remove.clicked.connect(lambda _=False, n=name: self.remove_attachment(n))
+            row = QHBoxLayout(chip)
+            row.setContentsMargins(8, 2, 2, 2)
+            row.setSpacing(4)
+            row.addWidget(label)
+            row.addWidget(remove)
+            self.attachments_layout.addWidget(chip)
+        self.attachments_container.setVisible(bool(self.attachments))
+        self.attachments_container.updateGeometry()
+
+    def reset_attachments(self):
+        """Forget the attached files when the connection closes."""
+        self.attachments = {}
+        self.failed_attachments = {}
+        self.allowed_extensions = []
+        self.attach_button.setEnabled(False)
+        self.render_attachments()
 
     def add_user_message(self, text):
         """Add a user message to the chat layout."""

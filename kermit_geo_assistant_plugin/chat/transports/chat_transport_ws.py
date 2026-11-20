@@ -44,7 +44,12 @@ class ChatTransportWs(QObject):
         if not conversation:
             return
         query = conversation[-1]["content"]  # Send only the latest user message
-        self.queue.append(query)
+        self.queue.append({"type": "query", "content": query})
+        self.try_send_next()
+
+    def send_files_attached(self):
+        """Tell Kermit that files were attached and no text was sent."""
+        self.queue.append({"type": "files_attached"})
         self.try_send_next()
 
     def close(self):
@@ -59,12 +64,8 @@ class ChatTransportWs(QObject):
         if not self.connected or self.sending or not self.queue:
             return
         self.sending = True
-        query = self.queue.pop(0)
-        request = {
-            "type": "query",
-            "content": query
-        }
-        # Send the query as a JSON string
+        request = self.queue.pop(0)
+        # Send the request as a JSON string
         self.ws.sendTextMessage(json.dumps(request))
 
     def cancel(self):
