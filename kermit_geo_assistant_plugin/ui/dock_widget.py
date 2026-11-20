@@ -57,6 +57,7 @@ class DockWidget(QDockWidget):
         # Collapsible group wrapping tabs + connection settings
         connection_group = QgsCollapsibleGroupBox("Connection Settings")
         connection_group.setCollapsed(False)
+        self.connection_group = connection_group
 
         # Adaptive tab widget that resizes based on content, containing connection settings for each tab
         self.tabs = AdaptiveTabWidget()
@@ -78,12 +79,14 @@ class DockWidget(QDockWidget):
         group_layout = QVBoxLayout()
         group_layout.addWidget(self.tabs)
         connection_group.setLayout(group_layout)
+        margins = group_layout.contentsMargins()  # the style's margins; the side margins are dropped
+        group_layout.setContentsMargins(0, margins.top(), 0, margins.bottom())
 
         # Layout for main widget
         main_layout = QVBoxLayout(main_widget)
         main_layout.addWidget(connection_group, 0) # connection group takes minimum space needed
         main_layout.addWidget(self.chat_stack, 1) # chat takes remaining space
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(2, 2, 2, 2)  # space around the settings and the chat
         main_layout.setSpacing(0)
 
     def _add_tab(self, title):
@@ -99,6 +102,13 @@ class DockWidget(QDockWidget):
             chat_controller = ChatController(transport_type='ws', parent=self)
             conn_widget = ConnWidgetWs(mcp_controller, chat_controller, parent=self)
             chat_widget = ChatWidget(chat_controller, parent=self)
+
+        # The settings fold away when the connection is up and open again when it is down
+        index = self.tabs.count()
+        mcp_controller.connected.connect(lambda *_, i=index: self._set_settings_collapsed(i, True))
+        mcp_controller.disconnected.connect(lambda *_, i=index: self._set_settings_collapsed(i, False))
+        if hasattr(mcp_controller, "error"):
+            mcp_controller.error.connect(lambda *_, i=index: self._set_settings_collapsed(i, False))
 
         # Set size policies to ensure proper resizing behavior
         conn_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -118,6 +128,11 @@ class DockWidget(QDockWidget):
         self.tabs.addTab(tab, title)
         self.chat_stack.addWidget(chat_widget)  # index matches tab index
         self.tab_widgets.append({"connection": conn_widget, "chat": chat_widget})
+
+    def _set_settings_collapsed(self, tab_index, collapsed):
+        """Fold or open the connection settings when the connection of the shown tab changes."""
+        if tab_index == self.tabs.currentIndex():
+            self.connection_group.setCollapsed(collapsed)
 
     def _on_tab_changed(self, new_index):
         """Handle tab change: stop old connection and clear old chat when switching tabs"""
