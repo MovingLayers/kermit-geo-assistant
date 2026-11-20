@@ -35,6 +35,7 @@ class ConnWidgetTcp(QWidget):
 
         # Main layout
         layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         # Input fields for connection parameters
