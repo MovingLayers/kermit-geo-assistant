@@ -78,15 +78,70 @@
     margin: 8px 4px;
 }
 
-/* Prompt field */
-#GeoAI_Assistant_Dock QTextEdit#promptInput {
+/* Input box: attached files, prompt field, buttons */
+#GeoAI_Assistant_Dock QFrame#inputBox {
     border: 1px solid #f4f3f3;
     border-radius: 10px;
     background-color: #f4f3f3;
-    padding: 6px;
     margin: 5px;
+}
+
+#GeoAI_Assistant_Dock QWidget#attachmentsContainer {
+    background-color: transparent;
+}
+
+#GeoAI_Assistant_Dock QTextEdit#promptInput {
+    border: none;
+    background-color: transparent;
+    padding: 2px;
     font-family: Arial, sans-serif;
     font-size: 13px;
+}
+
+/* Attached file */
+#GeoAI_Assistant_Dock QFrame#attachmentChip {
+    background-color: #e4e3e7;
+    border: none;
+    border-radius: 8px;
+}
+
+#GeoAI_Assistant_Dock QFrame#attachmentChip[failed="true"] {
+    background-color: #f6d5d0;
+}
+
+#GeoAI_Assistant_Dock QFrame#attachmentChip QLabel,
+#GeoAI_Assistant_Dock QToolButton#removeAttachment {
+    background-color: transparent;
+    border: none;
+    font-size: 12px;
+}
+
+#GeoAI_Assistant_Dock QToolButton#removeAttachment {
+    border-radius: 8px;
+    padding: 0 4px;
+    color: #555555;
+}
+
+#GeoAI_Assistant_Dock QToolButton#removeAttachment:hover {
+    background-color: rgba(53, 53, 54, 0.15);
+}
+
+/* Attach button */
+#GeoAI_Assistant_Dock QToolButton#attachButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 12px;
+    font-size: 18px;
+    padding: 0;
+    color: #555555;
+}
+
+#GeoAI_Assistant_Dock QToolButton#attachButton:hover {
+    background-color: #e4e3e7;
+}
+
+#GeoAI_Assistant_Dock QToolButton#attachButton:disabled {
+    color: #b5b4b8;
 }
 
 /* Cancel button */
