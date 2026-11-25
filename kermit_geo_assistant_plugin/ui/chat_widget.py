@@ -5,7 +5,7 @@ from qgis.core import *
 from qgis.gui import *
 from qgis.PyQt.QtCore import Qt, QEvent, QPointF, QRect, QSize, QTimer
 from qgis.PyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea, QSizePolicy, QTextEdit, QTextBrowser, QToolButton, QFileDialog, QFrame
-from qgis.PyQt.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+from qgis.PyQt.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QFont
 
 from .flow_layout import FlowLayout
 from qgis.PyQt.QtGui import QTextTable, QTextFrameFormat, QBrush
@@ -43,6 +43,9 @@ class UserBubble(QLabel):
     PADDING_X = 8
     PADDING_Y = 4
     BORDER = 1
+    ROOM = 24   # a word-wrapped label needs more than the width of its text to keep it on one line
+    FONT_FAMILY = "Arial"
+    FONT_SIZE = 13
 
     def __init__(self, text):
         super().__init__(text)
@@ -50,21 +53,25 @@ class UserBubble(QLabel):
         self.setObjectName("chatMsgUser")
         self.setWordWrap(True)
         self.setContentsMargins(self.PADDING_X, self.PADDING_Y, self.PADDING_X, self.PADDING_Y)
+        # The font is set here and not only by the stylesheet: the bubble is measured before the stylesheet applies to it
+        font = QFont(self.FONT_FAMILY)
+        font.setPixelSize(self.FONT_SIZE)
+        self.setFont(font)
 
     def fit(self, available):
-        """Set width and height for a chat area of the given width."""
+        """Set width and height for a chat area of the given width.
+
+        The width is the text on one line plus a little room, up to a share of the chat width. The height is what the
+        label itself needs for that width, so wrapped text is never cut off.
+        """
         inner = int(available * self.SHARE) - 2 * (self.PADDING_X + self.BORDER)
         if inner <= 0:
             return
-        flags = Qt.TextWordWrap
-        text = self.text()
-        one_line = self.fontMetrics().boundingRect(QRect(0, 0, 100000, 100000), flags, text)
-        width = min(one_line.width() + 2, inner)
-        wrapped = self.fontMetrics().boundingRect(QRect(0, 0, width, 100000), flags, text)
-        self.setFixedSize(
-            width + 2 * (self.PADDING_X + self.BORDER),
-            wrapped.height() + 2 * (self.PADDING_Y + self.BORDER),
-        )
+        metrics = self.fontMetrics()
+        one_line = metrics.boundingRect(QRect(0, 0, 100000, 100000), Qt.TextWordWrap, self.text()).width()
+        width = min(one_line + self.ROOM, inner) + 2 * (self.PADDING_X + self.BORDER)
+        self.setFixedWidth(width)
+        self.setFixedHeight(self.heightForWidth(width))
 
 
 def style_tables(browser):
