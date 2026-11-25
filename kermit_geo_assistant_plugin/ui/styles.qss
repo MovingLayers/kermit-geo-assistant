@@ -65,8 +65,6 @@
     border: 1px solid #f4f3f3;
     border-radius: 10px;
     background-color: #f4f3f3;
-    font-family: Arial, sans-serif;
-    font-size: 13px;
 }
 
 /* Assistant message */
