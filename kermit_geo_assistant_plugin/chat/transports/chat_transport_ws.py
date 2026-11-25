@@ -2,6 +2,11 @@ from qgis.PyQt.QtCore import QObject, pyqtSignal, QUrl
 from PyQt5.QtWebSockets import QWebSocket
 import json
 
+# A gap between two parts of a reply. A plain blank line shows no gap in the chat bubble (Qt gives
+# Markdown paragraphs no spacing), so the gap is a paragraph that holds only a non-breaking space.
+GAP = "\n\u00a0\n\n"
+
+
 class ChatTransportWs(QObject):
     """
     ChatTransportWs is a QObject that manages a WebSocket connection to a chat server. 
@@ -24,6 +29,7 @@ class ChatTransportWs(QObject):
         self.queue = []   # pending messages to send
         self.sending = False
         self.cancelled = False
+        self.status_shown = False   # status lines were printed in the reply that is streaming
 
         # Create and connect WebSocket immediately
         self.init_websocket()
@@ -113,19 +119,23 @@ class ChatTransportWs(QObject):
             # Format the status message with icon
             if message:
                 content = f"{icon} {message}" if icon else message
-                # Add extra newline before phase messages
+                # A gap before phase messages
                 if m_type == "phase":
-                    content = "\n" + content
-                self.message.emit(content + "\n")   
+                    content = GAP + content
+                self.message.emit(content + "\n")
+                self.status_shown = True
         elif msg_type == "response":
             content = event.get("content", "")
             if content:
-                self.message.emit(content)
+                # A gap between the status lines and the reply
+                self.message.emit(GAP + content if self.status_shown else content)
+            self.status_shown = False
             # Emit finished after response is complete
             self.finished.emit()
             self.finish_sending()
         elif msg_type == "error":
             content = event.get("content", "")
+            self.status_shown = False
             self.error.emit(content)
             self.finish_sending()
         else:
