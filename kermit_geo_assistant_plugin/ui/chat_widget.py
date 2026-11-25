@@ -8,13 +8,37 @@ from qgis.PyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScro
 from qgis.PyQt.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
 
 from .flow_layout import FlowLayout
+from qgis.PyQt.QtGui import QTextTable, QTextFrameFormat, QBrush
+from qgis.PyQt.QtWidgets import QApplication
 
 
-TABLE_STYLE = """
-table { border-collapse: collapse; border-width: 1px; border-style: solid; border-color: #9aa0a6; }
-th, td { padding: 4px 10px; border-width: 1px; border-style: solid; border-color: #9aa0a6; }
-th { font-weight: bold; }
-"""
+HEADER_COLOR = "#eef0f4"
+LINE_COLOR = "#dcdee4"
+
+
+def style_tables(browser):
+    """Give the tables of a rendered Markdown message a light look: a tinted header, thin lines between the rows, no grid.
+
+    Qt ignores a stylesheet for the tables it makes from Markdown, so the formats of the table and its cells are set.
+    """
+    for frame in browser.document().rootFrame().childFrames():
+        if not isinstance(frame, QTextTable):
+            continue
+        table_format = frame.format()
+        table_format.setBorder(0)
+        table_format.setCellSpacing(0)
+        table_format.setCellPadding(5)
+        frame.setFormat(table_format)
+        for row in range(frame.rows()):
+            for column in range(frame.columns()):
+                cell = frame.cellAt(row, column)
+                cell_format = cell.format().toTableCellFormat()
+                if row == 0:
+                    cell_format.setBackground(QBrush(QColor(HEADER_COLOR)))
+                cell_format.setBottomBorder(1)
+                cell_format.setBottomBorderStyle(QTextFrameFormat.BorderStyle_Solid)
+                cell_format.setBottomBorderBrush(QBrush(QColor(LINE_COLOR)))
+                cell.setFormat(cell_format)
 
 
 def plus_icon(size=14, scale=4):
@@ -71,7 +95,22 @@ class ChatWidget(QWidget):
         self.allowed_extensions = []
         self.pending_prompt = ""
 
+        # Whether the user was working in this chat; the prompt gets the focus back only then
+        self.focus_here = False
+        self.focus_before_upload = False
+        QApplication.instance().focusChanged.connect(self.on_focus_changed)
+
         self.setup_ui()
+
+    def on_focus_changed(self, old, new):
+        """Remember whether the focus is inside this chat. A window that lost the focus altogether keeps the last answer."""
+        if new is not None:
+            self.focus_here = new is self or self.isAncestorOf(new)
+
+    def focus_prompt(self):
+        """Give the focus back to the prompt, but only if the user was working in this chat and not elsewhere in QGIS."""
+        if self.focus_here and self.prompt_input.isEnabled():
+            self.prompt_input.setFocus()
 
     def setup_ui(self):
         """Set up the chat widget UI"""
@@ -232,6 +271,7 @@ class ChatWidget(QWidget):
         self.prompt_input.clear()
         self.start_assistant_stream()
         self.controller.send(prompt)   # controller owns conversation + transport
+        self.focus_prompt()
 
     def deliver_files_attached(self, names):
         """Show the attached file names as the user's message and tell Kermit the files are there."""
@@ -239,10 +279,12 @@ class ChatWidget(QWidget):
         self.add_user_message(text)
         self.start_assistant_stream()
         self.controller.send_files_attached(names)
+        self.focus_prompt()
 
     def on_upload_done(self, failures):
         """Send the message when all files are stored; otherwise keep it and mark the failed files."""
         self.set_sending_enabled(True)
+        self.focus_prompt()
         if not failures:
             names = list(self.attachments)
             self.attachments = {}
@@ -260,6 +302,10 @@ class ChatWidget(QWidget):
 
     def set_sending_enabled(self, enabled):
         """Block the input and the attach button while files are uploading."""
+        if not enabled:
+            self.focus_before_upload = self.focus_here   # disabling the prompt moves the focus away
+        else:
+            self.focus_here = self.focus_before_upload
         self.prompt_input.setEnabled(enabled)
         self.attach_button.setEnabled(enabled and bool(self.allowed_extensions))
 
@@ -278,12 +324,15 @@ class ChatWidget(QWidget):
     def pick_files(self):
         """Let the user choose files; a file with the name of a listed file replaces it."""
         patterns = " ".join(f"*{e}" for e in self.allowed_extensions)
+        focus_before = self.focus_here   # the file dialog takes the focus
         paths, _ = QFileDialog.getOpenFileNames(self, "Attach files", "", f"Supported files ({patterns})")
+        self.focus_here = focus_before
         for path in paths:
             name = os.path.basename(path)
             self.attachments[name] = path
             self.failed_attachments.pop(name, None)
         self.render_attachments()
+        self.focus_prompt()
 
     def remove_attachment(self, name):
         """Remove a file from the list; nothing was uploaded yet."""
@@ -357,7 +406,6 @@ class ChatWidget(QWidget):
         self.assistant_msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.assistant_msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.assistant_msg.setFrameStyle(0)
-        self.assistant_msg.document().setDefaultStyleSheet(TABLE_STYLE)
         self.assistant_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.assistant_msg.setPlainText(self.pending_response_text)
         self.assistant_msg.setFixedHeight(40)
@@ -374,12 +422,14 @@ class ChatWidget(QWidget):
         self.assistant_text += text
         # A single newline is a space in Markdown; keep it as a line break (blank lines stay paragraph breaks)
         self.assistant_msg.setMarkdown(re.sub(r"(?<!\n)\n(?!\n)", "  \n", self.assistant_text))
+        style_tables(self.assistant_msg)
         self.assistant_msg.setFixedHeight(int(self.assistant_msg.document().size().height()) + 20)
         self.scroll_to_bottom()
 
     def on_stream_finished(self):
         """Finalize the assistant's message when the stream is finished."""
         self.cancel_button.setVisible(False)
+        self.focus_prompt()
         if not self.assistant_text.strip():
             if self.assistant_msg:
                 self.assistant_msg.deleteLater()
@@ -392,6 +442,7 @@ class ChatWidget(QWidget):
     def append_error(self, text):
         """Append an error message to the chat layout."""
         self.cancel_button.setVisible(False)
+        self.focus_prompt()
         if self.assistant_msg:
             # Reuse the in-progress bubble
             self.assistant_msg.setPlainText(f"Error: {text}")
