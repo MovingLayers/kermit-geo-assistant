@@ -8,6 +8,8 @@ from qgis.PyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScro
 from qgis.PyQt.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QFont
 
 from .flow_layout import FlowLayout
+
+QWIDGETSIZE_MAX = 16777215   # Qt's value for "no maximum size"
 from qgis.PyQt.QtGui import QTextTable, QTextFrameFormat, QBrush
 from qgis.PyQt.QtWidgets import QApplication
 
@@ -67,6 +69,9 @@ class UserBubble(QLabel):
         inner = int(available * self.SHARE) - 2 * (self.PADDING_X + self.BORDER)
         if inner <= 0:
             return
+        # The size set by an earlier fit would change what the label reports as its height
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
         metrics = self.fontMetrics()
         one_line = metrics.boundingRect(QRect(0, 0, 100000, 100000), Qt.TextWordWrap, self.text()).width()
         width = min(one_line + self.ROOM, inner) + 2 * (self.PADDING_X + self.BORDER)
