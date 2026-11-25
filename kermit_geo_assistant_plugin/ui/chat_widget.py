@@ -3,18 +3,93 @@ import re
 
 from qgis.core import *
 from qgis.gui import *
-from qgis.PyQt.QtCore import Qt, QEvent, QPointF, QSize
+from qgis.PyQt.QtCore import Qt, QEvent, QPointF, QRect, QSize, QTimer
 from qgis.PyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea, QSizePolicy, QTextEdit, QTextBrowser, QToolButton, QFileDialog, QFrame
 from qgis.PyQt.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
 
 from .flow_layout import FlowLayout
+from qgis.PyQt.QtGui import QTextTable, QTextFrameFormat, QBrush
+from qgis.PyQt.QtWidgets import QApplication
 
 
-TABLE_STYLE = """
-table { border-collapse: collapse; border-width: 1px; border-style: solid; border-color: #9aa0a6; }
-th, td { padding: 4px 10px; border-width: 1px; border-style: solid; border-color: #9aa0a6; }
-th { font-weight: bold; }
-"""
+HEADER_COLOR = "#eef0f4"
+LINE_COLOR = "#dcdee4"
+
+
+class AutoHeightBrowser(QTextBrowser):
+    """A message bubble whose height follows its text, also when the window width changes."""
+
+    PADDING = 20
+
+    def fit_height(self):
+        """Set the height to what the text needs at the current width."""
+        width = self.viewport().width()
+        if width <= 0:
+            return
+        self.document().setTextWidth(width)
+        height = int(self.document().size().height()) + self.PADDING
+        if self.height() != height:
+            self.setFixedHeight(height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit_height()
+
+
+class UserBubble(QLabel):
+    """A user message bubble that fits its text and grows up to a share of the chat width."""
+
+    SHARE = 0.85
+    PADDING_X = 8
+    PADDING_Y = 4
+    BORDER = 1
+
+    def __init__(self, text):
+        super().__init__(text)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.setObjectName("chatMsgUser")
+        self.setWordWrap(True)
+        self.setContentsMargins(self.PADDING_X, self.PADDING_Y, self.PADDING_X, self.PADDING_Y)
+
+    def fit(self, available):
+        """Set width and height for a chat area of the given width."""
+        inner = int(available * self.SHARE) - 2 * (self.PADDING_X + self.BORDER)
+        if inner <= 0:
+            return
+        flags = Qt.TextWordWrap
+        text = self.text()
+        one_line = self.fontMetrics().boundingRect(QRect(0, 0, 100000, 100000), flags, text)
+        width = min(one_line.width() + 2, inner)
+        wrapped = self.fontMetrics().boundingRect(QRect(0, 0, width, 100000), flags, text)
+        self.setFixedSize(
+            width + 2 * (self.PADDING_X + self.BORDER),
+            wrapped.height() + 2 * (self.PADDING_Y + self.BORDER),
+        )
+
+
+def style_tables(browser):
+    """Give the tables of a rendered Markdown message a light look: a tinted header, thin lines between the rows, no grid.
+
+    Qt ignores a stylesheet for the tables it makes from Markdown, so the formats of the table and its cells are set.
+    """
+    for frame in browser.document().rootFrame().childFrames():
+        if not isinstance(frame, QTextTable):
+            continue
+        table_format = frame.format()
+        table_format.setBorder(0)
+        table_format.setCellSpacing(0)
+        table_format.setCellPadding(5)
+        frame.setFormat(table_format)
+        for row in range(frame.rows()):
+            for column in range(frame.columns()):
+                cell = frame.cellAt(row, column)
+                cell_format = cell.format().toTableCellFormat()
+                if row == 0:
+                    cell_format.setBackground(QBrush(QColor(HEADER_COLOR)))
+                cell_format.setBottomBorder(1)
+                cell_format.setBottomBorderStyle(QTextFrameFormat.BorderStyle_Solid)
+                cell_format.setBottomBorderBrush(QBrush(QColor(LINE_COLOR)))
+                cell.setFormat(cell_format)
 
 
 def plus_icon(size=14, scale=4):
@@ -71,7 +146,22 @@ class ChatWidget(QWidget):
         self.allowed_extensions = []
         self.pending_prompt = ""
 
+        # Whether the user was working in this chat; the prompt gets the focus back only then
+        self.focus_here = False
+        self.focus_before_upload = False
+        QApplication.instance().focusChanged.connect(self.on_focus_changed)
+
         self.setup_ui()
+
+    def on_focus_changed(self, old, new):
+        """Remember whether the focus is inside this chat. A window that lost the focus altogether keeps the last answer."""
+        if new is not None:
+            self.focus_here = new is self or self.isAncestorOf(new)
+
+    def focus_prompt(self):
+        """Give the focus back to the prompt, but only if the user was working in this chat and not elsewhere in QGIS."""
+        if self.focus_here and self.prompt_input.isEnabled():
+            self.prompt_input.setFocus()
 
     def setup_ui(self):
         """Set up the chat widget UI"""
@@ -90,7 +180,7 @@ class ChatWidget(QWidget):
         self.chat_container = QWidget()
         self.chat_layout = QVBoxLayout()
         self.chat_layout.setAlignment(Qt.AlignTop)
-        self.chat_layout.setContentsMargins(0, 0, 0, 0)
+        self.chat_layout.setContentsMargins(5, 0, 5, 0)
         self.chat_layout.setSpacing(2)
         self.chat_container.setLayout(self.chat_layout)
         self.scroll_area.setWidget(self.chat_container)
@@ -98,6 +188,7 @@ class ChatWidget(QWidget):
 
         # Clear chat button
         self.clear_button = QToolButton()
+        self.clear_button.setObjectName("clearChatButton")
         self.clear_button.setText("Clear chat")
         self.clear_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), "icons", "clear_chat.png")))
         self.clear_button.setVisible(False)
@@ -151,10 +242,15 @@ class ChatWidget(QWidget):
         box_layout.addLayout(bottom_row)
         main_layout.addWidget(self.input_box)
 
+        self.scroll_area.viewport().installEventFilter(self)
+
         # Show placeholder content until connected
         self.show_placeholder()
 
     def eventFilter(self, obj, event):
+        # Refit the user bubbles when the chat area changes its width
+        if obj == self.scroll_area.viewport() and event.type() == QEvent.Resize:
+            QTimer.singleShot(0, self.fit_user_bubbles)
         # Handle Enter key for sending prompts
         if obj == self.prompt_input:
             if event.type() == QEvent.KeyPress:
@@ -198,15 +294,16 @@ class ChatWidget(QWidget):
         """Display a welcome message when the connection is established."""
         self.clear_chat()
         self.chat_layout.setAlignment(Qt.AlignTop)
-        msg = QTextBrowser()
+        msg = AutoHeightBrowser()
         msg.setOpenExternalLinks(False)
         msg.setReadOnly(True)
         msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         msg.setFrameStyle(0)
+        msg.document().setDocumentMargin(0)
         msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        msg.setPlainText("Hello! I'm your GeoAI assistant. How can I help you today?")
+        msg.setPlainText("Hallo! Ich bin Ihr GeoAI-Assistent. Wie kann ich Ihnen heute helfen?")
         msg.setFixedHeight(40)
 
         self.chat_layout.addWidget(msg)
@@ -232,6 +329,7 @@ class ChatWidget(QWidget):
         self.prompt_input.clear()
         self.start_assistant_stream()
         self.controller.send(prompt)   # controller owns conversation + transport
+        self.focus_prompt()
 
     def deliver_files_attached(self, names):
         """Show the attached file names as the user's message and tell Kermit the files are there."""
@@ -239,10 +337,12 @@ class ChatWidget(QWidget):
         self.add_user_message(text)
         self.start_assistant_stream()
         self.controller.send_files_attached(names)
+        self.focus_prompt()
 
     def on_upload_done(self, failures):
         """Send the message when all files are stored; otherwise keep it and mark the failed files."""
         self.set_sending_enabled(True)
+        self.focus_prompt()
         if not failures:
             names = list(self.attachments)
             self.attachments = {}
@@ -260,6 +360,10 @@ class ChatWidget(QWidget):
 
     def set_sending_enabled(self, enabled):
         """Block the input and the attach button while files are uploading."""
+        if not enabled:
+            self.focus_before_upload = self.focus_here   # disabling the prompt moves the focus away
+        else:
+            self.focus_here = self.focus_before_upload
         self.prompt_input.setEnabled(enabled)
         self.attach_button.setEnabled(enabled and bool(self.allowed_extensions))
 
@@ -278,12 +382,15 @@ class ChatWidget(QWidget):
     def pick_files(self):
         """Let the user choose files; a file with the name of a listed file replaces it."""
         patterns = " ".join(f"*{e}" for e in self.allowed_extensions)
+        focus_before = self.focus_here   # the file dialog takes the focus
         paths, _ = QFileDialog.getOpenFileNames(self, "Attach files", "", f"Supported files ({patterns})")
+        self.focus_here = focus_before
         for path in paths:
             name = os.path.basename(path)
             self.attachments[name] = path
             self.failed_attachments.pop(name, None)
         self.render_attachments()
+        self.focus_prompt()
 
     def remove_attachment(self, name):
         """Remove a file from the list; nothing was uploaded yet."""
@@ -332,14 +439,9 @@ class ChatWidget(QWidget):
 
     def add_user_message(self, text):
         """Add a user message to the chat layout."""
-        msg = QLabel(text)
-        msg.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
-        msg.setObjectName("chatMsgUser")
-        msg.setWordWrap(True)
-        msg.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-        msg.setMaximumWidth(int(self.scroll_area.width() * 0.8))
-        msg.setMinimumWidth(200)
-        msg.setContentsMargins(8, 4, 8, 4)
+        msg = UserBubble(text)
+        msg.fit(self.chat_width())
+        QTimer.singleShot(0, self.fit_user_bubbles)  # the chat area may still change its width
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addStretch()
@@ -347,17 +449,26 @@ class ChatWidget(QWidget):
         self.chat_layout.addLayout(layout)
         self.scroll_to_bottom()
 
+    def chat_width(self):
+        """The width available for messages."""
+        return self.scroll_area.viewport().width() - self.chat_layout.contentsMargins().left() - self.chat_layout.contentsMargins().right()
+
+    def fit_user_bubbles(self):
+        """Fit the user bubbles to the chat area's current width."""
+        for bubble in self.chat_container.findChildren(UserBubble):
+            bubble.fit(self.chat_width())
+
     def start_assistant_stream(self):
         """Prepare the UI for a new assistant response stream."""
         self.assistant_text = ""
-        self.assistant_msg = QTextBrowser()
+        self.assistant_msg = AutoHeightBrowser()
         self.assistant_msg.setOpenExternalLinks(False)
         self.assistant_msg.setReadOnly(True)
         self.assistant_msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.assistant_msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.assistant_msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.assistant_msg.setFrameStyle(0)
-        self.assistant_msg.document().setDefaultStyleSheet(TABLE_STYLE)
+        self.assistant_msg.document().setDocumentMargin(0)
         self.assistant_msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.assistant_msg.setPlainText(self.pending_response_text)
         self.assistant_msg.setFixedHeight(40)
@@ -374,12 +485,14 @@ class ChatWidget(QWidget):
         self.assistant_text += text
         # A single newline is a space in Markdown; keep it as a line break (blank lines stay paragraph breaks)
         self.assistant_msg.setMarkdown(re.sub(r"(?<!\n)\n(?!\n)", "  \n", self.assistant_text))
-        self.assistant_msg.setFixedHeight(int(self.assistant_msg.document().size().height()) + 20)
+        style_tables(self.assistant_msg)
+        self.assistant_msg.fit_height()
         self.scroll_to_bottom()
 
     def on_stream_finished(self):
         """Finalize the assistant's message when the stream is finished."""
         self.cancel_button.setVisible(False)
+        self.focus_prompt()
         if not self.assistant_text.strip():
             if self.assistant_msg:
                 self.assistant_msg.deleteLater()
@@ -392,6 +505,7 @@ class ChatWidget(QWidget):
     def append_error(self, text):
         """Append an error message to the chat layout."""
         self.cancel_button.setVisible(False)
+        self.focus_prompt()
         if self.assistant_msg:
             # Reuse the in-progress bubble
             self.assistant_msg.setPlainText(f"Error: {text}")
@@ -399,13 +513,14 @@ class ChatWidget(QWidget):
             self.assistant_text = ""
         else:
             # No bubble in progress — create a new one
-            msg = QTextBrowser()
+            msg = AutoHeightBrowser()
             msg.setOpenExternalLinks(False)
             msg.setReadOnly(True)
             msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
             msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             msg.setFrameStyle(0)
+            msg.document().setDocumentMargin(0)
             msg.setPlainText(f"Error: {text}")
             msg.setFixedHeight(40)
 
