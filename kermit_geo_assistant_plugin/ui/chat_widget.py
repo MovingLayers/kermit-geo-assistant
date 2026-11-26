@@ -141,6 +141,7 @@ class ChatWidget(QWidget):
         self.controller.connected.connect(lambda: self.prompt_input.setEnabled(True))
         self.controller.connected.connect(self.show_welcome_message)
         self.controller.disconnected.connect(lambda: self.prompt_input.setEnabled(False))
+        self.controller.disconnected.connect(self.reset_stream)
         self.controller.disconnected.connect(self.show_placeholder)
         self.controller.disconnected.connect(self.reset_attachments)
         self.controller.allowed_types.connect(self.on_allowed_types)
@@ -353,6 +354,8 @@ class ChatWidget(QWidget):
 
     def on_upload_done(self, failures):
         """Send the message when all files are stored; otherwise keep it and mark the failed files."""
+        if self.controller.transport is None:
+            return  # the connection closed during the upload: the input stays off until the user connects again
         self.set_sending_enabled(True)
         self.focus_prompt()
         if not failures:
@@ -440,6 +443,12 @@ class ChatWidget(QWidget):
             self.attachments_layout.addWidget(chip)
         self.attachments_container.setVisible(bool(self.attachments))
         self.attachments_container.updateGeometry()
+
+    def reset_stream(self):
+        """Forget the reply that was streaming when the connection closed: its bubble is removed with the chat."""
+        self.assistant_msg = None
+        self.assistant_text = ""
+        self.cancel_button.setVisible(False)
 
     def reset_attachments(self):
         """Forget the attached files when the connection closes."""

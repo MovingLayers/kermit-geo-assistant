@@ -19,6 +19,7 @@ class ChatTransportWs(QObject):
     error = pyqtSignal(str)         # error messages
     connection_error = pyqtSignal(str)  # separate signal for connection errors
     session_created = pyqtSignal(str)   # emitted with session_id once server confirms session
+    connection_lost = pyqtSignal()      # an established connection was closed by the server or the network
 
     def __init__(self, url: str, parent=None):
         """Initialize the WebSocket connection to the given URL."""
@@ -26,6 +27,8 @@ class ChatTransportWs(QObject):
         self.url = url
         self.ws: QWebSocket = None  # type: ignore
         self.connected = False
+        self.closing = False   # the plugin closes the socket itself: its disconnect is no loss
+        self.has_session = False   # the server confirmed a session: only then a close is a lost connection
         self.queue = []   # pending messages to send
         self.sending = False
         self.cancelled = False
@@ -60,6 +63,7 @@ class ChatTransportWs(QObject):
 
     def close(self):
         """Close the WebSocket when plugin is closed"""
+        self.closing = True
         if self.ws:
             self.ws.close()
             self.ws = None
@@ -106,6 +110,7 @@ class ChatTransportWs(QObject):
         
         # Handle different message types accordingly
         if msg_type == "session_created":
+            self.has_session = True
             self.session_created.emit(event.get("session_id", ""))
             return
         elif msg_type == "status":
@@ -148,8 +153,15 @@ class ChatTransportWs(QObject):
         self.try_send_next()  # send any queued message
 
     def _on_disconnected(self):
-        """Handle WebSocket disconnection."""
+        """Handle WebSocket disconnection. A close that was not asked for resets the send state and reports the loss."""
         self.connected = False
+        if self.closing or not self.has_session:
+            return  # closed on purpose, or refused before a session existed (the error message says why)
+        self.sending = False
+        self.cancelled = False
+        self.status_shown = False
+        self.queue.clear()
+        self.connection_lost.emit()
 
     def _on_error(self, code):
         """Handle WebSocket errors."""
