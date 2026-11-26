@@ -39,6 +39,7 @@ class ConnWidgetWs(QWidget):
         self._closing = False   # both connections are being closed on purpose
         self._reconnecting = False   # one automatic attempt to restore a lost connection is running
         self._attempt = 0   # counts attempts, so an old timeout does not stop a newer one
+        self._generation = 0   # counts the closings of the connections: a loss report of an old connection is stale
         self._connected_at = None   # when the QGIS connection came up (monotonic seconds)
         self.controller.connected.connect(self._on_connected)
         self.controller.disconnected.connect(self._on_disconnected)
@@ -127,6 +128,7 @@ class ConnWidgetWs(QWidget):
     def _close_both(self):
         """Close the QGIS connection and the chat connection on purpose."""
         self._closing = True
+        self._generation += 1
         self._connected_at = None
         try:
             self.controller.disconnect()
@@ -137,11 +139,20 @@ class ConnWidgetWs(QWidget):
     def _on_connection_lost(self):
         """The chat connection was closed by the server or the network: close the rest and say so.
         Deferred, because the chat socket is still inside its own disconnect signal."""
-        QTimer.singleShot(0, self._handle_connection_lost)
+        self._schedule_connection_lost()
 
-    def _handle_connection_lost(self, text=None):
+    def _schedule_connection_lost(self, text=None):
+        """Handle a lost connection right after the current signal. The server usually closes the chat and
+        the QGIS connection together, so two reports come in for one loss: the first one is handled, the
+        second one finds the connections closed again (or already restored) and is dropped."""
+        generation = self._generation
+        QTimer.singleShot(0, lambda: self._handle_connection_lost(text, generation))
+
+    def _handle_connection_lost(self, text=None, generation=None):
         """The connection closed without the user asking: close both connections, so the chat shows the
         disconnected state, then try once to connect again, or show the reason."""
+        if generation is not None and generation != self._generation:
+            return  # stale: a loss of a connection that was closed since
         if self.chat_controller.transport is None:
             return  # already closed
         was_up = self._connected_at is not None and time.monotonic() - self._connected_at >= MIN_CONNECTED_SECONDS
@@ -184,7 +195,7 @@ class ConnWidgetWs(QWidget):
             return
         self._show_error(msg)
         if not self._closing and self.chat_controller.transport is not None:
-            QTimer.singleShot(0, lambda: self._handle_connection_lost(msg))
+            self._schedule_connection_lost(msg)
 
     def _on_connected(self):
         """Called when successfully connected to the Kermit."""
@@ -205,7 +216,7 @@ class ConnWidgetWs(QWidget):
         self.set_fields_enabled(True)
         if not self._closing and self.chat_controller.transport is not None:
             # The QGIS connection closed while the chat connection is still open
-            QTimer.singleShot(0, self._handle_connection_lost)
+            self._schedule_connection_lost()
 
     def _on_error(self, msg):
         """Called when the chat connection reports an error."""
