@@ -138,6 +138,7 @@ class ChatWidget(QWidget):
         self.controller.message.connect(self.append_assistant_stream)
         self.controller.finished.connect(self.on_stream_finished)
         self.controller.error.connect(self.append_error)
+        self.controller.notice.connect(self.append_notice)
         self.controller.connected.connect(lambda: self.prompt_input.setEnabled(True))
         self.controller.connected.connect(self.show_welcome_message)
         self.controller.disconnected.connect(lambda: self.prompt_input.setEnabled(False))
@@ -319,6 +320,23 @@ class ChatWidget(QWidget):
         msg.setPlainText("Hallo! Ich bin Ihr GeoAI-Assistent. Wie kann ich Ihnen heute helfen?")
         msg.setFixedHeight(40)
 
+        self.chat_layout.addWidget(msg)
+        self.scroll_to_bottom()
+        self.update_clear_button_visibility()
+
+    def append_notice(self, text):
+        """Show a message of the plugin itself in the chat, below what is there."""
+        msg = AutoHeightBrowser()
+        msg.setOpenExternalLinks(False)
+        msg.setReadOnly(True)
+        msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        msg.setFrameStyle(0)
+        msg.document().setDocumentMargin(0)
+        msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        msg.setPlainText(text)
+        msg.setFixedHeight(40)
         self.chat_layout.addWidget(msg)
         self.scroll_to_bottom()
         self.update_clear_button_visibility()

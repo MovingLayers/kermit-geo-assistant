@@ -17,6 +17,7 @@ class ChatController(QObject):
     error = pyqtSignal(str)
     connection_error = pyqtSignal(str)
     connection_lost = pyqtSignal()  # an established connection was closed without the user asking (ws transport only)
+    notice = pyqtSignal(str)  # a message of the plugin itself for the chat, e.g. after a restored connection
     connected = pyqtSignal() # emitted when connection is established
     disconnected = pyqtSignal() # emitted when connection is closed
     session_created = pyqtSignal(str)  # emitted with server-assigned session_id (ws transport only)
