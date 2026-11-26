@@ -463,10 +463,11 @@ class ChatWidget(QWidget):
         self.attachments_container.updateGeometry()
 
     def reset_stream(self):
-        """Forget the reply that was streaming when the connection closed: its bubble is removed with the chat."""
+        """Forget the conversation and the reply that was streaming when the connection closed: the session is gone."""
         self.assistant_msg = None
         self.assistant_text = ""
         self.cancel_button.setVisible(False)
+        self.controller.clear_conversation()
 
     def reset_attachments(self):
         """Forget the attached files when the connection closes."""

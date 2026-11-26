@@ -10,7 +10,7 @@ from qgis.PyQt.QtGui import QIcon
 # A new connection is a new session: attached files and a run in progress are gone.
 CONNECTION_LOST_TEXT = "Verbindung zum Server verloren. Bitte neu verbinden."
 RECONNECTING_TEXT = "Verbindung verloren. Verbindung wird wiederhergestellt …"
-RECONNECTED_TEXT = "Verbindung wiederhergestellt. Bitte wählen Sie den Workflow erneut aus."
+RECONNECTED_TEXT = "Verbindung wiederhergestellt. Die bisherige Unterhaltung ist beendet. Bitte schreiben Sie Ihre Anfrage erneut."
 RECONNECT_FAILED_TEXT = "Verbindung zum Server verloren. Die Wiederherstellung ist fehlgeschlagen. Bitte neu verbinden."
 
 # A lost connection is restored once, and only when it had held for a while: a server that closes every
