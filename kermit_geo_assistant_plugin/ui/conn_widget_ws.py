@@ -13,9 +13,11 @@ RECONNECTING_TEXT = "Verbindung verloren. Verbindung wird wiederhergestellt …"
 RECONNECTED_TEXT = "Verbindung wiederhergestellt. Die bisherige Unterhaltung ist beendet. Bitte schreiben Sie Ihre Anfrage erneut."
 RECONNECT_FAILED_TEXT = "Verbindung zum Server verloren. Die Wiederherstellung ist fehlgeschlagen. Bitte neu verbinden."
 
-# A lost connection is restored once, and only when it had held for a while: a server that closes every
-# new connection at once must not make the plugin loop. The attempt gives up after the timeout.
+# A lost connection is restored in a few attempts, and only when it had held for a while: a server that
+# closes every new connection at once must not make the plugin loop. The pauses before the attempts grow
+# (2, 5, 10 and 20 s: a restart of the server is covered); an attempt gives up after the timeout.
 MIN_CONNECTED_SECONDS = 10
+RECONNECT_DELAYS_MS = (2000, 5000, 10000, 20000)
 RECONNECT_TIMEOUT_MS = 15000
 
 class ConnWidgetWs(QWidget):
@@ -39,6 +41,7 @@ class ConnWidgetWs(QWidget):
         self._closing = False   # both connections are being closed on purpose
         self._reconnecting = False   # one automatic attempt to restore a lost connection is running
         self._attempt = 0   # counts attempts, so an old timeout does not stop a newer one
+        self._tries = 0   # attempts made in the running reconnect
         self._generation = 0   # counts the closings of the connections: a loss report of an old connection is stale
         self._connected_at = None   # when the QGIS connection came up (monotonic seconds)
         self.controller.connected.connect(self._on_connected)
@@ -150,7 +153,7 @@ class ConnWidgetWs(QWidget):
 
     def _handle_connection_lost(self, text=None, generation=None):
         """The connection closed without the user asking: close both connections, so the chat shows the
-        disconnected state, then try once to connect again, or show the reason."""
+        disconnected state, then try to connect again, or show the reason."""
         if generation is not None and generation != self._generation:
             return  # stale: a loss of a connection that was closed since
         if self.chat_controller.transport is None:
@@ -164,13 +167,26 @@ class ConnWidgetWs(QWidget):
             self._fail(text or CONNECTION_LOST_TEXT)
 
     def _start_reconnect(self):
-        """Connect again with the credentials of the last connection. It is a new session."""
+        """Connect again with the credentials of the last connection, in up to four attempts."""
         self._reconnecting = True
+        self._tries = 0
+        self._next_attempt()
+
+    def _next_attempt(self):
+        """Wait, then connect again; the pause grows with every attempt."""
+        delay = RECONNECT_DELAYS_MS[self._tries]
+        self._tries += 1
         self._attempt += 1
         attempt = self._attempt
-        self.status_label.setText(f"Status: {RECONNECTING_TEXT}")
+        self.status_label.setText(f"Status: {RECONNECTING_TEXT} (Versuch {self._tries} von {len(RECONNECT_DELAYS_MS)})")
         self.start_button.setText("Disconnect")
         self.set_fields_enabled(False)
+        QTimer.singleShot(delay, lambda: self._try_connect(attempt))
+
+    def _try_connect(self, attempt):
+        """Connect again. It is a new session. Nothing happens when the user closed the connection meanwhile."""
+        if not self._reconnecting or attempt != self._attempt:
+            return
         self.chat_controller.connect(self._pending_url, self._pending_api_key)
         QTimer.singleShot(RECONNECT_TIMEOUT_MS, lambda: self._reconnect_timeout(attempt))
 
@@ -180,12 +196,16 @@ class ConnWidgetWs(QWidget):
             self._fail("")
 
     def _fail(self, text):
-        """End the connection with an error. A failed reconnect says so instead of the single cause."""
+        """End the connection with an error. During a reconnect the next attempt follows; after the last one
+        the widget says that the restore failed instead of the single cause."""
         reconnecting = self._reconnecting
-        self._reconnecting = False
-        self._attempt += 1
+        self._attempt += 1   # the timeout of the failed attempt does not count any more
         if self.chat_controller.transport is not None:
             self._close_both()
+        if reconnecting and self._tries < len(RECONNECT_DELAYS_MS):
+            self._next_attempt()
+            return
+        self._reconnecting = False
         self._show_error(RECONNECT_FAILED_TEXT if reconnecting else text)
 
     def _on_mcp_error(self, msg):
