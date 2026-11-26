@@ -6,6 +6,7 @@ from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import QAction
 from qgis.PyQt.QtGui import QIcon
 
+from .network_thread import stop_network_thread
 from .ui.dock_widget import DockWidget
 
 class KermitGeoAssistantPlugin:
@@ -67,7 +68,10 @@ class KermitGeoAssistantPlugin:
             self.iface.removeDockWidget(self.dock_widget)
             self.dock_widget.deleteLater()
             self.dock_widget = None
-            
+
+        # End the thread of the WebSocket connections (their close requests run first)
+        stop_network_thread()
+
         # Remove plugin menu item and toolbar icon
         self.iface.removePluginMenu("Kermit GeoAssistant", self.action)
         self.iface.removeToolBarIcon(self.action)
