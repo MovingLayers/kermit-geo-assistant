@@ -1,7 +1,12 @@
 from qgis.core import *
 from qgis.gui import *
 from qgis.PyQt.QtWidgets import QVBoxLayout, QLabel, QPushButton, QLineEdit, QWidget, QSizePolicy, QFormLayout
+from qgis.PyQt.QtCore import QTimer
 from qgis.PyQt.QtGui import QIcon
+
+# Shown when the server or the network closed the connection and the user did not ask for it.
+# A new connection is a new session: attached files and a run in progress are gone.
+CONNECTION_LOST_TEXT = "Verbindung zum Server verloren. Bitte neu verbinden."
 
 class ConnWidgetWs(QWidget):
     """
@@ -21,10 +26,12 @@ class ConnWidgetWs(QWidget):
         self.chat_controller = chat_controller
         self._pending_url = ""
         self._pending_api_key = ""
+        self._closing = False   # both connections are being closed on purpose
         self.controller.connected.connect(self._on_connected)
         self.controller.disconnected.connect(self._on_disconnected)
-        self.controller.error.connect(self._on_error)
+        self.controller.error.connect(self._on_mcp_error)
         self.chat_controller.connection_error.connect(self._on_error)
+        self.chat_controller.connection_lost.connect(self._on_connection_lost)
         self.chat_controller.session_created.connect(self._on_session_created)
 
         self.setup_ui()
@@ -75,8 +82,7 @@ class ConnWidgetWs(QWidget):
     def toggle_connection(self):
         """Connect or disconnect based on the current state of the connection."""
         if self.start_button.text() == "Disconnect":
-            self.controller.disconnect()
-            self.chat_controller.close()
+            self._close_both()
         else:
             # Store credentials so _on_session_created can connect MCP once the
             # server sends back the session_id via the chat WebSocket.
@@ -91,8 +97,34 @@ class ConnWidgetWs(QWidget):
 
     def disconnect(self):
         """Called by dock_widget on close."""
-        self.controller.disconnect()
-        self.chat_controller.close()
+        self._close_both()
+
+    def _close_both(self):
+        """Close the QGIS connection and the chat connection on purpose."""
+        self._closing = True
+        try:
+            self.controller.disconnect()
+            self.chat_controller.close()
+        finally:
+            self._closing = False
+
+    def _on_connection_lost(self):
+        """The chat connection was closed by the server or the network: close the rest and say so.
+        Deferred, because the chat socket is still inside its own disconnect signal."""
+        QTimer.singleShot(0, self._handle_connection_lost)
+
+    def _handle_connection_lost(self, text=CONNECTION_LOST_TEXT):
+        """Close both connections, so the chat shows the disconnected state, and show the reason."""
+        if self.chat_controller.transport is None:
+            return  # already closed
+        self._close_both()
+        self._on_error(text)
+
+    def _on_mcp_error(self, msg):
+        """The QGIS connection failed: the chat connection is of no use without it, close it too."""
+        self._on_error(msg)
+        if not self._closing and self.chat_controller.transport is not None:
+            QTimer.singleShot(0, lambda: self._handle_connection_lost(msg))
 
     def _on_connected(self):
         """Called when successfully connected to the Kermit."""
@@ -105,6 +137,9 @@ class ConnWidgetWs(QWidget):
         self.status_label.setText("Status: Disconnected")
         self.start_button.setText("Connect")
         self.set_fields_enabled(True)
+        if not self._closing and self.chat_controller.transport is not None:
+            # The QGIS connection closed while the chat connection is still open
+            QTimer.singleShot(0, self._handle_connection_lost)
 
     def _on_error(self, msg):
         """Called when there is an error in connection."""

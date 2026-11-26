@@ -16,6 +16,7 @@ class ChatController(QObject):
     finished = pyqtSignal()
     error = pyqtSignal(str)
     connection_error = pyqtSignal(str)
+    connection_lost = pyqtSignal()  # an established connection was closed without the user asking (ws transport only)
     connected = pyqtSignal() # emitted when connection is established
     disconnected = pyqtSignal() # emitted when connection is closed
     session_created = pyqtSignal(str)  # emitted with server-assigned session_id (ws transport only)
@@ -106,5 +107,6 @@ class ChatController(QObject):
         self.transport.error.connect(self.error)
         self.transport.connection_error.connect(self.connection_error)
         if self.transport_type == 'ws':
+            self.transport.connection_lost.connect(self.connection_lost)
             self.transport.session_created.connect(self.session_created)
             self.transport.session_created.connect(self.on_session_created)
