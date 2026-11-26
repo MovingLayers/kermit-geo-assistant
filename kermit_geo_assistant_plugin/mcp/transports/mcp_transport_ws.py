@@ -18,6 +18,7 @@ class McpTransportWs(QObject):
         """Initialize the WebSocket transport with the backend URL and command execution"""
         super().__init__(parent)
         self.url = url
+        self.log_url = url.split("?", 1)[0]  # the query holds the API key and the session id: never logged
         self.execute_command = execute_command
 
         self.client = None
@@ -126,12 +127,12 @@ class McpTransportWs(QObject):
             
     def _on_connected(self):
         """Handle successful connection to backend"""
-        QgsMessageLog.logMessage(f"Connected to backend WebSocket: {self.url}", "GeoAI Assistant")
+        QgsMessageLog.logMessage(f"Connected to backend WebSocket: {self.log_url}", "GeoAI Assistant")
         self.connected.emit()
     
     def _on_disconnected(self):
         """Handle disconnection from backend"""
-        QgsMessageLog.logMessage(f"Disconnected from backend WebSocket: {self.url}", "GeoAI Assistant")
+        QgsMessageLog.logMessage(f"Disconnected from backend WebSocket: {self.log_url}", "GeoAI Assistant")
         self.tools_sent = False
         self.disconnected.emit()  
 
