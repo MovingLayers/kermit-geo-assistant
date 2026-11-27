@@ -138,6 +138,7 @@ class ChatWidget(QWidget):
         self.controller.message.connect(self.append_assistant_stream)
         self.controller.finished.connect(self.on_stream_finished)
         self.controller.error.connect(self.append_error)
+        self.controller.notice.connect(self.append_notice)
         self.controller.connected.connect(lambda: self.prompt_input.setEnabled(True))
         self.controller.connected.connect(self.show_welcome_message)
         self.controller.disconnected.connect(lambda: self.prompt_input.setEnabled(False))
@@ -323,6 +324,23 @@ class ChatWidget(QWidget):
         self.scroll_to_bottom()
         self.update_clear_button_visibility()
 
+    def append_notice(self, text):
+        """Show a message of the plugin itself in the chat, below what is there."""
+        msg = AutoHeightBrowser()
+        msg.setOpenExternalLinks(False)
+        msg.setReadOnly(True)
+        msg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        msg.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        msg.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        msg.setFrameStyle(0)
+        msg.document().setDocumentMargin(0)
+        msg.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        msg.setPlainText(text)
+        msg.setFixedHeight(40)
+        self.chat_layout.addWidget(msg)
+        self.scroll_to_bottom()
+        self.update_clear_button_visibility()
+
     def send_prompt(self):
         """Send the user's prompt to the controller and prepare the UI for the assistant's response."""
         prompt = self.prompt_input.toPlainText().strip()
@@ -445,10 +463,11 @@ class ChatWidget(QWidget):
         self.attachments_container.updateGeometry()
 
     def reset_stream(self):
-        """Forget the reply that was streaming when the connection closed: its bubble is removed with the chat."""
+        """Forget the conversation and the reply that was streaming when the connection closed: the session is gone."""
         self.assistant_msg = None
         self.assistant_text = ""
         self.cancel_button.setVisible(False)
+        self.controller.clear_conversation()
 
     def reset_attachments(self):
         """Forget the attached files when the connection closes."""
