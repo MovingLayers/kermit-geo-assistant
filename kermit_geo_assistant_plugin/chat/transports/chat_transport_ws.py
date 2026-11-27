@@ -1,19 +1,23 @@
-from qgis.PyQt.QtCore import QObject, pyqtSignal, QUrl
+from qgis.PyQt.QtCore import QObject, Qt, pyqtSignal, pyqtSlot, QUrl
 from PyQt5.QtWebSockets import QWebSocket
 import json
 
+from ...network_thread import move_to_network_thread
+
 # A gap between two parts of a reply. A plain blank line shows no gap in the chat bubble (Qt gives
 # Markdown paragraphs no spacing), so the gap is a paragraph that holds only a non-breaking space.
-GAP = "\n\u00a0\n\n"
+GAP = "\n \n\n"
+
+# The signals the worker passes on to the transport (and the transport to the controller)
+RELAYED = ("message", "finished", "error", "connection_error", "session_created", "connection_lost")
 
 
-class ChatTransportWs(QObject):
+class ChatSocketWorker(QObject):
     """
-    ChatTransportWs is a QObject that manages a WebSocket connection to a chat server. 
-    It handles sending messages, receiving streaming responses, and emitting signals for the ChatInterfaceWidget to update the UI accordingly. 
-    It also manages connection state and error handling.
+    The chat WebSocket. It lives in the network thread (see network_thread.py), so the socket answers
+    the pings of the server while the QGIS main thread is busy. It handles sending messages, receiving
+    streaming responses and the connection state, and reports to the transport through signals.
     """
-    # Signals to communicate with the ChatInterfaceWidget
     message = pyqtSignal(str)       # streaming chunks
     finished = pyqtSignal()         # message fully received
     error = pyqtSignal(str)         # error messages
@@ -21,10 +25,8 @@ class ChatTransportWs(QObject):
     session_created = pyqtSignal(str)   # emitted with session_id once server confirms session
     connection_lost = pyqtSignal()      # an established connection was closed by the server or the network
 
-    def __init__(self, url: str, parent=None):
-        """Initialize the WebSocket connection to the given URL."""
-        super().__init__(parent)
-        self.url = url
+    def __init__(self):
+        super().__init__()
         self.ws: QWebSocket = None  # type: ignore
         self.connected = False
         self.closing = False   # the plugin closes the socket itself: its disconnect is no loss
@@ -34,40 +36,31 @@ class ChatTransportWs(QObject):
         self.cancelled = False
         self.status_shown = False   # status lines were printed in the reply that is streaming
 
-        # Create and connect WebSocket immediately
-        self.init_websocket()
-
-    def init_websocket(self):
-        """Initialize the WebSocket and connect signals."""
+    @pyqtSlot(str)
+    def open_socket(self, url: str):
+        """Create the WebSocket in this thread, connect its signals and open it."""
         self.ws = QWebSocket()
-        # Connect WebSocket signals to local handler methods
         self.ws.textMessageReceived.connect(self._on_message) # incoming text
         self.ws.error.connect(self._on_error) # connection errors
         self.ws.connected.connect(self._on_connected) # connection established
         self.ws.disconnected.connect(self._on_disconnected) # connection closed
-        # Open the WebSocket connection
-        self.ws.open(QUrl(self.url))
+        self.ws.open(QUrl(url))
 
-    def send(self, conversation):
-        """Send a conversation to the Kermit."""
-        if not conversation:
-            return
-        query = conversation[-1]["content"]  # Send only the latest user message
-        self.queue.append({"type": "query", "content": query})
+    @pyqtSlot(object)
+    def enqueue(self, request: dict):
+        """Queue a request and send it when the connection is ready and no reply is pending."""
+        self.queue.append(request)
         self.try_send_next()
 
-    def send_files_attached(self):
-        """Tell Kermit that files were attached and no text was sent."""
-        self.queue.append({"type": "files_attached"})
-        self.try_send_next()
-
+    @pyqtSlot()
     def close(self):
-        """Close the WebSocket when plugin is closed"""
+        """Close the WebSocket when the connection is closed on purpose."""
         self.closing = True
         if self.ws:
             self.ws.close()
             self.ws = None
-            self.connected = False
+        self.connected = False
+        self.deleteLater()
 
     def try_send_next(self):
         """Send next message in queue if connection is ready."""
@@ -78,6 +71,7 @@ class ChatTransportWs(QObject):
         # Send the request as a JSON string
         self.ws.sendTextMessage(json.dumps(request))
 
+    @pyqtSlot()
     def cancel(self):
         """Cancel the current message and clear the queue."""
         self.cancelled = True
@@ -96,7 +90,7 @@ class ChatTransportWs(QObject):
             self.error.emit(f"Invalid JSON: {text}")
             self.finish_sending()
             return
-        
+
         # Determine message type
         msg_type = event.get("type")
 
@@ -107,7 +101,7 @@ class ChatTransportWs(QObject):
                 self.cancelled = False
                 self.finish_sending()
             return
-        
+
         # Handle different message types accordingly
         if msg_type == "session_created":
             self.has_session = True
@@ -167,3 +161,68 @@ class ChatTransportWs(QObject):
         """Handle WebSocket errors."""
         self.connection_error.emit(f"WebSocket error: {code}")
         self.finish_sending()
+
+
+class ChatTransportWs(QObject):
+    """
+    The chat connection as the controller uses it. The socket itself lives in the network thread
+    (ChatSocketWorker); this object stays in the main thread, passes requests to the worker through
+    queued signals and relays what the worker reports.
+    """
+    # Signals to communicate with the ChatInterfaceWidget
+    message = pyqtSignal(str)       # streaming chunks
+    finished = pyqtSignal()         # message fully received
+    error = pyqtSignal(str)         # error messages
+    connection_error = pyqtSignal(str)  # separate signal for connection errors
+    session_created = pyqtSignal(str)   # emitted with session_id once server confirms session
+    connection_lost = pyqtSignal()      # an established connection was closed by the server or the network
+
+    # Requests to the worker
+    _open = pyqtSignal(str)
+    _enqueue = pyqtSignal(object)
+    _cancel = pyqtSignal()
+    _close = pyqtSignal()
+
+    def __init__(self, url: str, parent=None):
+        """Create the worker in the network thread and open the connection to the given URL."""
+        super().__init__(parent)
+        self.url = url
+        self._closed = False
+        self.worker = ChatSocketWorker()
+        move_to_network_thread(self.worker)
+        for name in RELAYED:
+            getattr(self.worker, name).connect(getattr(self, name), Qt.QueuedConnection)
+        self._open.connect(self.worker.open_socket, Qt.QueuedConnection)
+        self._enqueue.connect(self.worker.enqueue, Qt.QueuedConnection)
+        self._cancel.connect(self.worker.cancel, Qt.QueuedConnection)
+        self._close.connect(self.worker.close, Qt.QueuedConnection)
+        self._open.emit(url)
+
+    def send(self, conversation):
+        """Send a conversation to the Kermit."""
+        if not conversation or self._closed:
+            return
+        query = conversation[-1]["content"]  # Send only the latest user message
+        self._enqueue.emit({"type": "query", "content": query})
+
+    def send_files_attached(self):
+        """Tell Kermit that files were attached and no text was sent."""
+        if not self._closed:
+            self._enqueue.emit({"type": "files_attached"})
+
+    def cancel(self):
+        """Cancel the current message and clear the queue."""
+        if not self._closed:
+            self._cancel.emit()
+
+    def close(self):
+        """Close the connection on purpose. What the worker still reports is dropped."""
+        if self._closed:
+            return
+        self._closed = True
+        self._close.emit()
+        for name in RELAYED:
+            try:
+                getattr(self, name).disconnect()
+            except TypeError:
+                pass  # no receiver
